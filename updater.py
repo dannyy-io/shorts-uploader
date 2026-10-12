@@ -9,9 +9,12 @@ import json
 import os
 import shutil
 import time
+import urllib.error
+import urllib.request
 import zipfile
 
-import requests
+# Only the Python standard library is used here, so updates (and the launcher) work
+# even before the app's own packages are installed.
 
 REPO = "dannyy-io/shorts-uploader"
 BRANCH = "main"
@@ -32,6 +35,18 @@ PROTECTED = {"data", "downloads", ".venv", ".git", "__pycache__"}
 
 class UpdateError(Exception):
     pass
+
+
+def _get(url, headers=None, timeout=8):
+    """Open a URL; returns the response (caller closes). Raises UpdateError with a friendly message."""
+    req = urllib.request.Request(url, headers={"User-Agent": "shorts-uploader-updater", **(headers or {})})
+    try:
+        return urllib.request.urlopen(req, timeout=timeout)
+    except urllib.error.HTTPError as e:
+        raise UpdateError(f"GitHub answered {e.code} when checking for updates.")
+    except (urllib.error.URLError, OSError) as e:
+        reason = getattr(e, "reason", e)
+        raise UpdateError(f"Couldn't reach GitHub ({type(reason).__name__}).")
 
 
 def parse(v):
@@ -80,16 +95,13 @@ def check(timeout=8):
                          (API_VERSION_URL, {"Accept": "application/vnd.github.raw"})):
         if url == API_VERSION_URL and os.environ.get("SHORTS_UPLOADER_UPDATE_BASE"):
             break
+        full = f"{url}?t={int(time.time())}" if url == VERSION_URL else url
         try:
-            r = requests.get(url, params={"t": int(time.time())} if url == VERSION_URL else None,
-                             timeout=timeout, headers=headers)
-        except requests.RequestException as e:
-            problem = f"Couldn't reach GitHub ({type(e).__name__})."
-            continue
-        if r.status_code == 200:
-            latest = r.text.strip()
+            with _get(full, headers, timeout) as r:
+                latest = r.read(64).decode("utf-8", "replace").strip()
             break
-        problem = f"GitHub answered {r.status_code} when checking for updates."
+        except UpdateError as e:
+            problem = str(e)
     if latest is None:
         raise UpdateError(problem or "Couldn't check for updates.")
     if parse(latest) == (0,):
@@ -140,13 +152,11 @@ def apply(expected=None, timeout=60):
     zip_path = os.path.join(WORK_DIR, "new.zip")
     extract_dir = os.path.join(WORK_DIR, "new")
     try:
-        with requests.get(ZIP_URL, stream=True, timeout=timeout) as r:
-            if r.status_code != 200:
-                raise UpdateError(f"Download failed (HTTP {r.status_code}).")
-            with open(zip_path, "wb") as f:
-                for chunk in r.iter_content(1024 * 256):
-                    f.write(chunk)
-    except requests.RequestException as e:
+        with _get(ZIP_URL, timeout=timeout) as r, open(zip_path, "wb") as f:
+            shutil.copyfileobj(r, f, 1024 * 256)
+    except UpdateError as e:
+        raise UpdateError("Download failed: " + str(e))
+    except OSError as e:
         raise UpdateError(f"Download failed ({type(e).__name__}).")
 
     shutil.rmtree(extract_dir, ignore_errors=True)

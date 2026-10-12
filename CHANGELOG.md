@@ -1,5 +1,9 @@
 # What's new
 
+## 1.6.1
+- Fix: a fresh install could fail to start with "No module named 'requests'". The launcher now installs the app's packages first, and checks they actually load.
+- Stopping the server in Dockge is now instant (it used to hang for 10 seconds).
+
 ## 1.6.0
 - Runs on a home server (Docker/Dockge) so scheduled posts go out with your PC off. Password-protected; open it from any device on your network.
 - Settings → Move to another computer: export your accounts, presets, post times, history and queue to one file and import it elsewhere (optionally moving the queue so nothing posts twice).

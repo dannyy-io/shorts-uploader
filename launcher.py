@@ -9,6 +9,7 @@ that fails to start. Output goes to data/app.log.
 """
 import hashlib
 import os
+import signal
 import socket
 import subprocess
 import sys
@@ -64,22 +65,31 @@ def pip(*args):
     return proc.returncode == 0
 
 
+def deps_importable():
+    """True if the app's core packages actually load in this Python."""
+    probe = subprocess.run([console_python(), "-c", "import flask, requests"], cwd=BASE_DIR,
+                           capture_output=True, creationflags=NO_WINDOW)
+    return probe.returncode == 0
+
+
 def ensure_deps():
-    """Install requirements when requirements.txt changes (e.g. after an update)."""
-    import updater
+    """Install the app's packages if they're missing or requirements.txt changed (e.g. after an update)."""
+    import updater  # standard library only, so this works before anything is installed
     try:
         with open(os.path.join(BASE_DIR, "requirements.txt"), "rb") as f:
             digest = hashlib.sha256(f.read()).hexdigest()
     except OSError:
         return
-    st = updater.state()
-    if st.get("req_hash") == digest:
+    if updater.state().get("req_hash") == digest and deps_importable():
         return
-    log("Installing dependencies")
+    log("Installing what the app needs (first start or after an update; can take a few minutes)")
     if pip("-r", "requirements.txt"):
         pip("-U", *EXTRAS)
         pip("-U", *OPTIONAL)
         updater.save_state(req_hash=digest, extras_checked=time.time())
+        log("Packages installed")
+    else:
+        log("Installing packages failed; check the internet connection. Details above.")
 
 
 def try_update():
@@ -113,12 +123,32 @@ def run_app():
                             stdout=logf, stderr=subprocess.STDOUT, creationflags=NO_WINDOW), logf
 
 
+_child = None
+_stopping = False
+
+
+def _on_stop(signum, frame):
+    """Docker/Dockge 'Stop' (SIGTERM): ask the app to stop; main() sees it exit and returns.
+    (Waiting for the app here would deadlock with main()'s own wait, so we don't.)"""
+    global _stopping
+    _stopping = True
+    log("Stop requested; shutting down")
+    if _child is not None:
+        try:
+            _child.terminate()
+        except OSError:
+            pass
+
+
 def open_window():
     import winapp
     winapp.open_window(URL)
 
 
 def main():
+    global _child
+    if hasattr(signal, "SIGTERM") and os.name != "nt":
+        signal.signal(signal.SIGTERM, _on_stop)
     background = "--background" in sys.argv
     if port_open():  # already running: just show it
         if not background:
@@ -126,11 +156,14 @@ def main():
         return
 
     first_start, crashes = True, 0
-    while True:
+    while not _stopping:
+        ensure_deps()  # first, so a fresh install has its packages
         just_updated = try_update()
-        ensure_deps()
+        if just_updated:
+            ensure_deps()  # the update may need new packages
         started = time.time()
         proc, logf = run_app()
+        _child = proc
         if first_start and not background:
             for _ in range(160):  # wait up to 40 s for the server
                 if port_open() or proc.poll() is not None:
@@ -142,6 +175,8 @@ def main():
         code = proc.wait()
         logf.close()
         log(f"App exited with code {code}")
+        if _stopping:
+            return
 
         if code == 0:
             return  # Quit from the tray / Settings
