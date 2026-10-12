@@ -138,6 +138,7 @@ def upload(path, title, description, opts, report):
             "title": title,
             "description": description or "",
             "categoryId": str(opts.get("category_id") or "22"),
+            "tags": fit_tags(opts.get("tags") or []),
         },
         "status": {
             "privacyStatus": opts.get("privacy", "public"),
@@ -206,6 +207,22 @@ def upload(path, title, description, opts, report):
                 offset = _query_offset(session_url, token, size, offset)
                 continue
             raise UploadError(error_text(resp))
+
+
+def fit_tags(tags, limit=500):
+    """YouTube allows 500 characters of tags in total (commas count, and tags with spaces
+    count 2 extra for quotes). Keep as many as fit, in order."""
+    out, used = [], 0
+    for t in tags:
+        t = t.replace("<", "").replace(">", "").strip()[:100]
+        if not t:
+            continue
+        cost = len(t) + (2 if " " in t else 0) + (1 if out else 0)
+        if used + cost > limit:
+            continue
+        out.append(t)
+        used += cost
+    return out
 
 
 def _next_offset(resp):

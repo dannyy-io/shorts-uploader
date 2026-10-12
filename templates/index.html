@@ -255,6 +255,26 @@
   #pasteSignin input { width: 100%; }
   .whats-new { white-space: pre-wrap; font-size: 13px; color: var(--muted); margin-top: 8px; max-height: 180px; overflow: auto; }
 
+  /* AI summary */
+  .ai-bar { display: flex; gap: 8px; margin-bottom: 14px; }
+  .ai-bar input { flex: 1; min-width: 0; }
+  .ai-bar button { white-space: nowrap; }
+  @media (max-width: 560px) { .ai-bar { flex-direction: column; } }
+  .ai-card { border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line)); background: color-mix(in srgb, var(--accent) 7%, var(--panel-2));
+             border-radius: 12px; padding: 12px 14px; margin: -4px 0 16px; font-size: 14px; display: grid; gap: 10px; }
+  .ai-card .lbl { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-bottom: 4px; }
+  .ai-card .sum { color: var(--text); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { background: var(--panel); border: 1px solid var(--line); border-radius: 99px; padding: 4px 10px; cursor: pointer; font-size: 13px; color: var(--text); text-align: left; }
+  .chip:hover { border-color: var(--accent); }
+  .chip.tag { cursor: default; padding: 2px 9px; font-size: 12.5px; }
+  .tag-row { display: grid; grid-template-columns: 92px 1fr; gap: 8px; align-items: start; }
+  .tag-row > span { font-size: 12.5px; color: var(--muted); padding-top: 3px; }
+  .ai-card .acts { display: flex; gap: 6px; flex-wrap: wrap; }
+  .ai-status { font-size: 13px; color: var(--muted); margin: -8px 0 14px; }
+  .ai-status.err { color: var(--err); }
+  .tag-opt { margin: -6px 0 14px; font-size: 13.5px; color: var(--muted); gap: 6px; }
+
   /* bulk */
   #bulkList { margin: 12px 0; display: grid; gap: 8px; }
   .bulk-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 150px) auto; gap: 8px; align-items: center;
@@ -262,8 +282,15 @@
   .bulk-row input { padding: 7px 9px; font-size: 14px; background: var(--panel); }
   .bulk-row .src { grid-column: 1 / -1; font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .bulk-row .st { grid-column: 1 / -1; font-size: 12.5px; }
+  .bulk-row .btg { grid-column: 1 / -1; font-size: 13px; padding: 6px 9px; }
+  .bulk-row .sum { grid-column: 1 / -1; font-size: 12.5px; color: var(--muted); }
+  .bulk-row .rowbtns { display: flex; gap: 4px; }
+  #bulk textarea { min-height: 70px; }
+  .bulk-opts { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 4px 0 8px; font-size: 13.5px; }
+  .dl-batch { margin-top: 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .file-row .pick { flex: none; width: 18px; height: 18px; }
   .bulk-row.done .st { color: var(--ok); } .bulk-row.error .st { color: var(--err); }
-  @media (max-width: 560px) { .bulk-row { grid-template-columns: 1fr auto; } .bulk-row .cr { grid-column: 1 / -1; grid-row: 3; } }
+  @media (max-width: 560px) { .bulk-row { grid-template-columns: 1fr auto; } .bulk-row .cr { grid-column: 1 / -1; } }
   .dl-pick { display: grid; gap: 4px; margin-top: 8px; max-height: 220px; overflow: auto; }
   .dl-pick label { display: flex; gap: 8px; align-items: center; font-size: 14px; padding: 4px 0; }
   .dl-pick label span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -312,6 +339,12 @@
   </section>
 
   <section class="card">
+    <div class="ai-bar">
+      <input type="text" id="aiHint" placeholder="Optional: tell the AI what this is (e.g. Demon Slayer AMV)" autocomplete="off">
+      <button class="ghost" id="aiGo" type="button">✨ Summarize video</button>
+    </div>
+    <div class="ai-status" id="aiStatus" hidden></div>
+    <div class="ai-card" id="aiCard" hidden></div>
     <label class="field">
       <span>Title <em class="count" id="titleCount">0 / 100</em></span>
       <input type="text" id="title" placeholder="What's this Short about?" autocomplete="off">
@@ -326,6 +359,11 @@
       <button class="connect-link" type="button" data-edit-presets>edit presets</button>
       <span class="kbd" id="presetPreview"></span>
     </div>
+    <label class="field">
+      <span>Tags <em class="count" id="tagsCount">0 / 500</em></span>
+      <input type="text" id="tags" placeholder="YouTube tags, comma-separated (e.g. bicep workout, fitness, shorts)" autocomplete="off">
+    </label>
+    <label class="row tag-opt"><input type="checkbox" id="tagsToCaptions"> Also add them as hashtags (top 3 on YouTube, up to 8 on Instagram and TikTok)</label>
     <details class="per-plat" id="perPlat">
       <summary>Different caption per platform</summary>
       <label class="field"><span>YouTube description <em class="count" data-cnt="youtube"></em></span>
@@ -415,7 +453,7 @@
 <main id="downloadView" hidden>
   <section class="card">
     <div class="dl-form">
-      <input type="text" id="dlUrl" placeholder="Paste a YouTube, Instagram or TikTok link" autocomplete="off" spellcheck="false">
+      <input type="text" id="dlUrl" placeholder="Paste one or more YouTube, Instagram or TikTok links" autocomplete="off" spellcheck="false">
       <button class="primary" id="dlGo">Download</button>
     </div>
     <div class="dl-opts">
@@ -438,12 +476,14 @@
       <span class="kbd" id="cookieNote">Only needed if a site says to log in (Instagram often does). See README.</span>
     </div>
     <div id="dlProgress"></div>
+    <div class="dl-batch" id="dlBatch" hidden></div>
     <div class="tool-line" id="toolLine" style="margin-top:16px"></div>
   </section>
 
   <section class="card">
     <div class="files-head">
       <h2>Downloaded videos</h2>
+      <button class="small-btn" id="queueSelected" hidden>Queue selected</button>
       <button class="small-btn" id="openFolder">Open folder</button>
     </div>
     <div id="dlFiles"><div class="empty">Nothing yet.</div></div>
@@ -509,6 +549,25 @@
       <div class="row"><button class="ghost" data-save>Save</button><button class="primary" data-connect="tiktok">Connect TikTok</button><button class="ghost" data-disconnect="tiktok">Disconnect</button></div>
     </div>
 
+    <div class="set" id="aiSet">
+      <h3>✨ AI summaries</h3>
+      <p>Google Gemini watches your video and suggests titles, a description and tags. Get a free API key at
+        <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> (sign in with Google, then <b>Create API key</b>).
+        A small low-resolution copy of each video you summarize is sent to Google.</p>
+      <div class="status-line" id="s_ai"></div>
+      <div class="two">
+        <label class="field"><span>Gemini API key</span><input type="password" id="aiKey" autocomplete="off" placeholder="Paste key"></label>
+        <label class="field"><span>Your niche (used for niche tags)</span><input type="text" id="aiNiche" autocomplete="off" placeholder="e.g. anime edits, AMV"></label>
+      </div>
+      <details style="margin-bottom:12px; font-size:13px"><summary style="cursor:pointer;color:var(--muted)">Advanced</summary>
+        <div class="two" style="margin-top:10px">
+          <label class="field"><span>Model (blank = pick automatically)</span><input type="text" id="aiModel" autocomplete="off" placeholder="automatic"></label>
+          <label class="field"><span>Language</span><input type="text" id="aiLang" autocomplete="off" placeholder="English"></label>
+        </div>
+      </details>
+      <div class="row"><button class="primary" type="button" id="aiSave">Save &amp; test</button><button class="ghost" type="button" id="aiRemove">Remove key</button></div>
+    </div>
+
     <div class="set" id="presetsSet">
       <h3>Caption presets</h3>
       <p>Text added to the end of a caption: hashtags, credit lines, links. You can use <code class="uri">{creator}</code>, <code class="uri">{link}</code> and <code class="uri">{title}</code>. A line is left out when its placeholder is empty.</p>
@@ -564,13 +623,19 @@
 <dialog id="bulk">
   <div class="dlg-head"><h2>Bulk add to queue</h2><button class="icon-btn" id="closeBulk">Close</button></div>
   <div class="dlg-body">
-    <p class="fineprint">Each video gets the next open post time, starting <b id="bulkStart">…</b>. They use the platforms, description, preset, per-platform captions and auto-fix settings on the Upload tab. Edit titles and credits below.</p>
+    <p class="fineprint">Each video gets the next open post time, starting <b id="bulkStart">…</b>. Platforms, preset, per-platform captions and auto-fix come from the Upload tab.</p>
+    <label class="field"><span>Description for all</span><textarea id="bulkDesc" placeholder="Same description on every video"></textarea></label>
+    <label class="field"><span>Tags for all <em class="count">added to each video's own tags</em></span><input type="text" id="bulkTags" autocomplete="off" placeholder="e.g. anime, amv, shorts"></label>
     <div class="row">
       <button class="ghost" id="bulkPick">Add files from PC…</button>
       <input type="file" id="bulkFiles" multiple hidden accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.m4v,.webm">
       <span class="kbd">or drop files on this window</span>
     </div>
     <details style="margin-top:10px"><summary style="cursor:pointer">Add from Downloads</summary><div class="dl-pick" id="bulkDl"></div></details>
+    <div class="bulk-opts">
+      <button class="ghost" type="button" id="bulkAi">✨ Generate titles &amp; tags</button>
+      <label><input type="checkbox" id="bulkAiDesc"> Start each description with its AI caption</label>
+    </div>
     <div id="bulkList"></div>
     <div class="row"><button class="primary" id="bulkGo" disabled>Add to queue</button><span class="kbd" id="bulkNote"></span></div>
   </div>
@@ -632,7 +697,7 @@ function applyStatus(s) {
   $("#yt_cid").value = st.youtube_client_id; $("#yt_secret").placeholder = st.youtube_has_secret ? "•••••• saved" : "";
   $("#tt_key").value = st.tiktok_client_key; $("#tt_secret").placeholder = st.tiktok_has_secret ? "•••••• saved" : "";
   $("#ig_host").value = st.instagram_api_host;
-  renderPresetSelect(); renderPresetEditor();
+  renderPresetSelect(); renderPresetEditor(); renderAiSettings();
   $("#fix").disabled = !st.ffmpeg;
   if (!st.ffmpeg) $("#fix").checked = false;
   restoreToggles(); refreshUI(); loadTikTokInfo();
@@ -687,7 +752,7 @@ document.addEventListener("drop", (e) => {
 
 function setFile(f) {
   if (!/\.(mp4|mov|m4v|webm)$/i.test(f.name)) return toast("Use an MP4, MOV or WebM file.", true);
-  file = f; meta = null; coverMs = null; $("#creator").value = ""; $("#link").value = "";
+  file = f; meta = null; coverMs = null; $("#creator").value = ""; $("#link").value = ""; hideAi();
   const url = URL.createObjectURL(f);
   drop.innerHTML = ""; const v = document.createElement("video");
   v.src = url; v.controls = true; v.muted = true; v.playsInline = true; v.preload = "metadata";
@@ -700,7 +765,7 @@ function setFile(f) {
 }
 
 function resetFile() {
-  file = null; meta = null; input.value = ""; coverMs = null;
+  file = null; meta = null; input.value = ""; coverMs = null; hideAi(); $("#tags").value = ""; $("#aiHint").value = "";
   $("#creator").value = ""; $("#link").value = ""; $("#trim").checked = false;
   ["youtube", "instagram", "tiktok"].forEach(p => $("#desc_" + p).value = "");
   drop.innerHTML = `<div class="hint"><b>Drop a video here</b>or click to choose<br><small>MP4, MOV or WebM · vertical 9:16</small></div>`;
@@ -708,7 +773,7 @@ function resetFile() {
 }
 
 function setServerFile(item) {
-  file = { name: item.name, size: item.size, serverName: item.name }; meta = null; coverMs = null;
+  file = { name: item.name, size: item.size, serverName: item.name }; meta = null; coverMs = null; hideAi();
   $("#creator").value = item.creator || ""; $("#link").value = item.link || "";
   drop.innerHTML = ""; const v = document.createElement("video");
   v.src = "/files/" + encodeURIComponent(item.name); v.controls = true; v.muted = true; v.playsInline = true; v.preload = "metadata";
@@ -787,7 +852,7 @@ $("#setCover").onclick = () => {
 };
 
 /* ---------- form ---------- */
-const FIELDS = ["yt_privacy", "yt_shorts_tag", "yt_notify", "yt_kids", "ig_feed", "tt_mode", "tt_no_comments", "fix", "fit", "preset"];
+const FIELDS = ["yt_privacy", "yt_shorts_tag", "yt_notify", "yt_kids", "ig_feed", "tt_mode", "tt_no_comments", "fix", "fit", "preset", "tagsToCaptions"];
 function restoreToggles() {
   const saved = store.get("toggles", {});
   $$("[data-toggle]").forEach(t => { if (!t.disabled) t.checked = saved[t.dataset.toggle] ?? true; });
@@ -798,13 +863,13 @@ function saveForm() {
   const opts = {}; FIELDS.forEach(id => { const el = $("#" + id); opts[id] = el.type === "checkbox" ? el.checked : el.value; });
   opts.tt_privacy = $("#tt_privacy").value;
   store.set("opts", opts);
-  store.set("draft", { title: $("#title").value, desc: $("#desc").value,
+  store.set("draft", { title: $("#title").value, desc: $("#desc").value, tags: $("#tags").value,
     pp: Object.fromEntries(["youtube", "instagram", "tiktok"].map(p => [p, $("#desc_" + p).value])) });
 }
 function restoreForm() {
   const opts = store.get("opts", {});
   FIELDS.forEach(id => { const el = $("#" + id); if (opts[id] === undefined) return; if (el.type === "checkbox") el.checked = opts[id]; else el.value = opts[id]; });
-  const d = store.get("draft", {}); $("#title").value = d.title || ""; $("#desc").value = d.desc || "";
+  const d = store.get("draft", {}); $("#title").value = d.title || ""; $("#desc").value = d.desc || ""; $("#tags").value = d.tags || "";
   ["youtube", "instagram", "tiktok"].forEach(p => $("#desc_" + p).value = (d.pp || {})[p] || "");
   if (Object.values(d.pp || {}).some(Boolean)) $("#perPlat").open = true;
 }
@@ -875,6 +940,8 @@ function captionLength() {
 function selected() { return $$("[data-toggle]").filter(t => t.checked && !t.disabled).map(t => t.dataset.toggle); }
 
 function refreshUI() {
+  const tagCost = splitTags($("#tags").value).reduce((n, t, i) => n + t.length + (t.includes(" ") ? 2 : 0) + (i ? 1 : 0), 0);
+  $("#tagsCount").textContent = `${tagCost} / 500`; $("#tagsCount").classList.toggle("over", tagCost > 500);
   const tl = $("#title").value.length, tc = $("#titleCount");
   tc.textContent = `${tl} / 100`; tc.classList.toggle("over", tl > 100);
   const cap = captionLength(), dc = $("#descCount");
@@ -921,9 +988,9 @@ function toLocalInput(d) {
   return z.toISOString().slice(0, 16);
 }
 
-["#title", "#desc", "#desc_youtube", "#desc_instagram", "#desc_tiktok"].forEach(s => $(s).addEventListener("input", () => { refreshUI(); saveForm(); }));
+["#title", "#desc", "#tags", "#desc_youtube", "#desc_instagram", "#desc_tiktok"].forEach(s => $(s).addEventListener("input", () => { refreshUI(); saveForm(); }));
 document.addEventListener("change", (e) => { if (e.target.closest("main")) { refreshUI(); saveForm(); } });
-$("#clear").onclick = () => { $("#title").value = ""; $("#desc").value = "";
+$("#clear").onclick = () => { $("#title").value = ""; $("#desc").value = ""; $("#tags").value = ""; hideAi();
   ["youtube", "instagram", "tiktok"].forEach(p => $("#desc_" + p).value = ""); saveForm(); refreshUI(); };
 document.addEventListener("keydown", (e) => { if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && !$("#go").disabled) upload(); });
 
@@ -961,10 +1028,15 @@ async function copy(text) {
 }
 
 function buildForm(src, o) {
-  // src: a File, or {serverName}. o: {title, creator, link, mode, whenTs, cover, trim}
+  // src: a File (maybe already sent: src.staged), or {serverName}.
+  // o: {title, creator, link, mode, whenTs, cover, trim, description?, tags?}
   const fd = new FormData();
-  if (src.serverName) fd.append("local_file", src.serverName); else fd.append("video", src);
-  fd.append("title", o.title); fd.append("description", $("#desc").value);
+  if (src.serverName) fd.append("local_file", src.serverName);
+  else if (src.staged) fd.append("staged", src.staged);
+  else fd.append("video", src);
+  fd.append("title", o.title); fd.append("description", o.description ?? $("#desc").value);
+  fd.append("tags", o.tags ?? $("#tags").value);
+  fd.append("tags_to_captions", $("#tagsToCaptions").checked ? "1" : "0");
   selected().forEach(p => fd.append("platforms", p));
   ["youtube", "instagram", "tiktok"].forEach(p => fd.append("desc_" + p, $("#desc_" + p).value));
   fd.append("preset", $("#preset").value);
@@ -1102,50 +1174,82 @@ async function loadTools() {
   };
 }
 
-function renderDl(job) {
-  const box = $("#dlProgress"); box.style.display = "block";
-  box.innerHTML = `<div class="prog ${job.state}">
+
+let dlJobs = [];
+function renderDlJobs() {
+  const box = $("#dlProgress"); box.style.display = dlJobs.length ? "block" : "none";
+  box.innerHTML = dlJobs.map(job => `<div class="prog ${job.state}">
     <div class="prog-top"><strong>${escapeHtml(job.title || job.url)}</strong>
-      <span>${job.state === "done" ? "✓" : job.state === "error" ? "✕" : Math.round(job.progress) + "%"}</span></div>
-    <div class="bar"><i style="width:${job.state === "error" ? 100 : job.progress}%"></i></div>
-    <div class="prog-msg">${escapeHtml(job.message)}
-      ${job.state === "done" && job.files.length === 1 ? ` · <a href="#" data-use="${escapeHtml(job.files[0])}">Use in uploader</a>` : ""}</div>
-  </div>`;
+      <span>${job.state === "done" ? "✓" : job.state === "error" ? "✕" : job.state === "waiting" ? "…" : Math.round(job.progress || 0) + "%"}</span></div>
+    <div class="bar"><i style="width:${job.state === "error" ? 100 : job.progress || 0}%"></i></div>
+    <div class="prog-msg">${escapeHtml(job.message || "")}
+      ${job.state === "done" && (job.files || []).length === 1 ? ` · <a href="#" data-use="${escapeHtml(job.files[0])}">Use in uploader</a>` : ""}</div>
+  </div>`).join("");
 }
+function linksIn(text) { return [...new Set((text.match(/https?:\/\/\S+/g) || []).map(u => u.replace(/[)\],.]+$/, "")))]; }
 
 async function startDownload() {
-  const url = $("#dlUrl").value.trim();
-  if (!url) return $("#dlUrl").focus();
-  try {
-    const { job_id } = await api("/api/download", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url, browser: $("#dlBrowser").value }) });
-    $("#dlGo").disabled = true; $("#dlGo").textContent = "Downloading…";
-    renderDl({ url, state: "running", progress: 0, message: "Looking up video", files: [] });
-    dlPolling = setInterval(async () => {
-      let job; try { job = await api("/api/download/" + job_id); } catch { return; }
-      renderDl(job);
-      if (job.state !== "running") {
-        clearInterval(dlPolling); dlPolling = null;
-        $("#dlGo").disabled = false; $("#dlGo").textContent = "Download";
-        if (job.state === "done") { $("#dlUrl").value = ""; loadDownloads(); }
+  const urls = linksIn($("#dlUrl").value);
+  if (!urls.length) { toast("Paste a link that starts with https://", true); return $("#dlUrl").focus(); }
+  dlJobs = urls.map(url => ({ url, state: "waiting", progress: 0, message: "Waiting", files: [] }));
+  $("#dlUrl").value = ""; $("#dlBatch").hidden = true;
+  $("#dlGo").disabled = true; dlPolling = "running"; renderDlJobs();
+  for (const [i, job] of dlJobs.entries()) {
+    $("#dlGo").textContent = urls.length > 1 ? `Downloading ${i + 1}/${urls.length}…` : "Downloading…";
+    try {
+      const { job_id } = await api("/api/download", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: job.url, browser: $("#dlBrowser").value }) });
+      Object.assign(job, { state: "running", message: "Looking up video" }); renderDlJobs();
+      while (true) {
+        await new Promise(r => setTimeout(r, 700));
+        let j; try { j = await api("/api/download/" + job_id); } catch { continue; }
+        Object.assign(job, j); renderDlJobs();
+        if (j.state !== "running") break;
       }
-    }, 700);
-  } catch (e) { toast(e.message, true); }
+    } catch (e) { Object.assign(job, { state: "error", message: e.message }); renderDlJobs(); }
+  }
+  dlPolling = null; $("#dlGo").disabled = false; $("#dlGo").textContent = "Download";
+  await loadDownloads();
+  const got = dlJobs.flatMap(j => j.state === "done" ? j.files : []);
+  if (got.length > 1) {
+    $("#dlBatch").hidden = false;
+    $("#dlBatch").innerHTML = `<button class="primary" type="button" id="queueBatch">Queue these ${got.length}…</button>
+      <span class="kbd">Opens Bulk add with them, so you can generate titles and tags and add them to the queue.</span>`;
+    $("#queueBatch").onclick = () => openBulk(got);
+  }
+  const failed = dlJobs.filter(j => j.state === "error").length;
+  if (urls.length > 1) toast(`Downloaded ${dlJobs.length - failed} of ${urls.length}`, failed > 0);
 }
 $("#dlGo").onclick = startDownload;
 $("#dlUrl").addEventListener("keydown", (e) => { if (e.key === "Enter" && !$("#dlGo").disabled) startDownload(); });
-$("#dlUrl").addEventListener("paste", () => setTimeout(() => {
-  if (/^https?:\/\//.test($("#dlUrl").value.trim()) && !$("#dlGo").disabled) startDownload();
-}, 0));
+$("#dlUrl").addEventListener("paste", (e) => {
+  const text = (e.clipboardData || window.clipboardData)?.getData("text") || "";
+  const links = linksIn(text);
+  if (links.length > 1) {  // several links: keep them all (an input would squash the line breaks)
+    e.preventDefault(); $("#dlUrl").value = links.join(" ");
+  }
+  setTimeout(() => { if (linksIn($("#dlUrl").value).length && !$("#dlGo").disabled) startDownload(); }, 0);
+});
 $("#dlBrowser").value = store.get("dlBrowser", "");
 $("#dlBrowser").onchange = () => store.set("dlBrowser", $("#dlBrowser").value);
 $("#openFolder").onclick = () => api("/api/downloads/open-folder", { method: "POST" }).catch(e => toast(e.message, true));
 
-let downloads = [];
+let downloads = [], picked = new Set();
+function updatePicked() {
+  const n = picked.size;
+  $("#queueSelected").hidden = !n; $("#queueSelected").textContent = `Queue selected (${n})`;
+}
+$("#dlFiles").addEventListener("change", (e) => {
+  const cb = e.target.closest("[data-pick]"); if (!cb) return;
+  cb.checked ? picked.add(cb.dataset.pick) : picked.delete(cb.dataset.pick); updatePicked();
+});
+$("#queueSelected").onclick = () => { const names = [...picked]; picked.clear(); updatePicked(); loadDownloads(); openBulk(names); };
 async function loadDownloads() {
   downloads = await api("/api/downloads").catch(() => []);
+  picked = new Set([...picked].filter(n => downloads.some(d => d.name === n))); updatePicked();
   $("#dlFiles").innerHTML = downloads.length ? downloads.map(f => `
     <div class="file-row">
+      <input type="checkbox" class="pick" data-pick="${escapeHtml(f.name)}" ${picked.has(f.name) ? "checked" : ""} aria-label="Select">
       <div class="fn"><div title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</div>
         <div>${f.creator ? `<span class="cr">${escapeHtml(f.creator)}</span> · ` : ""}${fmtSize(f.size)} · ${new Date(f.time * 1000).toLocaleString()}</div></div>
       <div class="acts">
@@ -1284,6 +1388,121 @@ $("#whenTime").addEventListener("input", refreshUI);
 setInterval(() => { if (!$("#queueView").hidden) loadQueue(); }, 3000);
 setInterval(() => { if ($("#queueView").hidden) loadQueue(); }, 30000);
 
+/* ---------- AI summaries ---------- */
+function splitTags(raw) {
+  const seen = new Set(), out = [];
+  (raw || "").split(/[,\n]/).map(t => t.replace(/#/g, "").replace(/\s+/g, " ").trim()).filter(Boolean)
+    .forEach(t => { if (!seen.has(t.toLowerCase())) { seen.add(t.toLowerCase()); out.push(t); } });
+  return out;
+}
+function allTags(r) { return splitTags([...(r.tags.post || []), ...(r.tags.niche || []), ...(r.tags.broad || [])].join(",")); }
+function mergeTags(...lists) { return splitTags(lists.flat().filter(Boolean).join(",")).join(", "); }
+
+function renderAiSettings() {
+  const ai = state.settings.ai || {};
+  $("#aiNiche").value = ai.niche || ""; $("#aiModel").value = ai.model || ""; $("#aiLang").value = ai.language || "";
+  $("#aiKey").placeholder = ai.has_key ? "•••••• saved" : "Paste key";
+  $("#s_ai").className = "status-line" + (ai.has_key ? " on" : "");
+  $("#s_ai").textContent = ai.has_key ? `Ready${ai.resolved_model ? " · using " + ai.resolved_model : ""}` : "No key yet.";
+  $("#aiRemove").hidden = !ai.has_key;
+}
+async function saveAi(extra = {}) {
+  const body = { niche: $("#aiNiche").value, model: $("#aiModel").value, language: $("#aiLang").value, test: true, ...extra };
+  if ($("#aiKey").value.trim()) body.key = $("#aiKey").value.trim();
+  $("#aiSave").disabled = true; $("#s_ai").textContent = "Checking with Google…";
+  try {
+    const r = await api("/api/ai/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    $("#aiKey").value = ""; toast(r.resolved_model ? `AI summaries ready (${r.resolved_model})` : "Saved");
+  } catch (e) { toast(e.message, true); }
+  $("#aiSave").disabled = false;
+  applyStatus(await api("/api/status"));
+}
+$("#aiSave").onclick = () => saveAi();
+$("#aiRemove").onclick = () => { if (confirm("Remove the Gemini key?")) saveAi({ clear_key: true, test: false }); };
+
+function stageFile(f, onProgress) {
+  return new Promise((resolve, reject) => {
+    const fd = new FormData(); fd.append("video", f);
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/stage"); xhr.setRequestHeader("X-Shorts-Uploader", "1");
+    xhr.upload.onprogress = (e) => e.lengthComputable && onProgress && onProgress(Math.round(100 * e.loaded / e.total));
+    xhr.onload = () => {
+      let body = {}; try { body = JSON.parse(xhr.responseText); } catch {}
+      if (xhr.status === 401 && SERVER_MODE) { location.href = "/login"; return; }
+      xhr.status === 200 ? resolve(body) : reject(new Error(body.error || `Failed (${xhr.status})`));
+    };
+    xhr.onerror = () => reject(new Error("Lost connection to the app"));
+    xhr.send(fd);
+  });
+}
+
+async function summarizeSrc(src, hint, onMsg) {
+  // src: {serverName} (a download) or a File (sent once, then reused for posting via src.staged)
+  const body = { hint };
+  if (src.serverName) body.local_file = src.serverName;
+  else {
+    if (!src.staged) src.staged = (await stageFile(src, pct => onMsg(`Sending video… ${pct}%`))).token;
+    body.staged = src.staged;
+  }
+  onMsg("Starting");
+  const { job_id } = await api("/api/summarize", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  while (true) {
+    await new Promise(r => setTimeout(r, 1200));
+    const job = await api("/api/summarize/" + job_id);
+    if (job.state === "done") return job.result;
+    if (job.state === "error") throw new Error(job.message);
+    onMsg(job.message + "…");
+  }
+}
+
+function needAiKey() {
+  if (state.settings.ai && state.settings.ai.has_key) return false;
+  toast("Add a free Gemini API key first (Settings → AI summaries).", true);
+  $("#settings").showModal(); setTimeout(() => $("#aiSet").scrollIntoView({ block: "start" }), 50);
+  return true;
+}
+function hideAi() { $("#aiCard").hidden = true; $("#aiStatus").hidden = true; aiResult = null; }
+let aiResult = null;
+
+$("#aiGo").onclick = async () => {
+  if (!file) return toast("Add a video first.", true);
+  if (needAiKey()) return;
+  const btn = $("#aiGo"), st = $("#aiStatus");
+  btn.disabled = true; st.hidden = false; st.className = "ai-status"; $("#aiCard").hidden = true;
+  const msg = (m) => { st.textContent = m; };
+  try {
+    aiResult = await summarizeSrc(file, $("#aiHint").value.trim(), msg);
+    st.hidden = true; renderAiCard(aiResult);
+  } catch (e) { st.className = "ai-status err"; st.textContent = e.message; }
+  btn.disabled = false;
+};
+
+function renderAiCard(r) {
+  const chips = (arr) => arr.map(t => `<span class="chip tag">${escapeHtml(t)}</span>`).join("") || `<span class="kbd">—</span>`;
+  $("#aiCard").innerHTML = `
+    <div><div class="lbl">Summary</div><div class="sum">${escapeHtml(r.summary)}</div></div>
+    <div><div class="lbl">Title ideas · click one to use it</div>
+      <div class="chips">${r.titles.map((t, i) => `<button type="button" class="chip" data-ai-title="${i}">${escapeHtml(t)}</button>`).join("")}</div></div>
+    <div><div class="lbl">Description</div><div>${escapeHtml(r.description)}</div>
+      <div class="acts" style="margin-top:6px"><button type="button" class="small-btn" data-ai-desc="use">Use</button>
+        <button type="button" class="small-btn" data-ai-desc="add">Add to mine</button></div></div>
+    <div><div class="lbl">Tags</div>
+      <div class="tag-row"><span>Post-specific</span><div class="chips">${chips(r.tags.post)}</div></div>
+      <div class="tag-row" style="margin-top:6px"><span>Niche</span><div class="chips">${chips(r.tags.niche)}</div></div>
+      <div class="tag-row" style="margin-top:6px"><span>Broad</span><div class="chips">${chips(r.tags.broad)}</div></div>
+      <div class="acts" style="margin-top:8px"><button type="button" class="small-btn" data-ai-tags="use">Use these tags</button>
+        <button type="button" class="small-btn" data-ai-tags="add">Add to mine</button></div></div>`;
+  $("#aiCard").hidden = false;
+}
+$("#aiCard").addEventListener("click", (e) => {
+  if (!aiResult) return;
+  const t = e.target.closest("[data-ai-title]"), d = e.target.closest("[data-ai-desc]"), g = e.target.closest("[data-ai-tags]");
+  if (t) { $("#title").value = aiResult.titles[+t.dataset.aiTitle].slice(0, 100); }
+  if (d) { $("#desc").value = d.dataset.aiDesc === "use" ? aiResult.description : [$("#desc").value.trim(), aiResult.description].filter(Boolean).join("\n\n"); }
+  if (g) { $("#tags").value = g.dataset.aiTags === "use" ? allTags(aiResult).join(", ") : mergeTags($("#tags").value, allTags(aiResult)); }
+  if (t || d || g) { refreshUI(); saveForm(); toast(t ? "Title set" : d ? "Description updated" : "Tags updated"); }
+});
+
 /* ---------- bulk add ---------- */
 let bulkItems = [], bulkBusy = false;
 
@@ -1301,33 +1520,42 @@ function sendForm(fd, onProgress) {
   });
 }
 
-$("#openBulk").onclick = async () => {
-  if (!selected().length) return toast("Turn on at least one platform first.", true);
+$("#openBulk").onclick = () => openBulk();
+async function openBulk(preselect = []) {
+  if (!selected().length) { showTab("upload"); return toast("Turn on at least one platform on the Upload tab first.", true); }
   bulkItems = bulkItems.filter(b => b.state === "ready");
+  if (!$("#bulkDesc").value.trim()) $("#bulkDesc").value = $("#desc").value;
   await loadQueue();
   $("#bulkStart").textContent = fmtWhen(queue.next_slot);
   downloads = await api("/api/downloads").catch(() => []);
+  for (const name of preselect) {
+    const f = downloads.find(d => d.name === name);
+    if (f && !bulkItems.some(b => b.dl === f.name)) bulkItems.push(bulkFromDownload(f));
+  }
   $("#bulkDl").innerHTML = downloads.length ? downloads.map((f, i) => `<label>
       <input type="checkbox" data-bdl="${i}" ${bulkItems.some(b => b.dl === f.name) ? "checked" : ""}>
       <span>${escapeHtml(f.name)}${f.creator ? " · " + escapeHtml(f.creator) : ""}</span></label>`).join("")
     : `<div class="empty">No downloads yet.</div>`;
   $("#bulkNote").textContent = `Platforms: ${selected().map(p => NAMES[p]).join(", ")}`;
   renderBulk(); $("#bulk").showModal();
-};
+}
+function bulkFromDownload(f) {
+  return { src: { serverName: f.name }, dl: f.name, name: f.name, size: f.size, title: titleFromName(f.name),
+           creator: f.creator || "", link: f.link || "", tags: "", state: "ready" };
+}
 $("#closeBulk").onclick = () => { if (!bulkBusy) $("#bulk").close(); };
 $("#bulkPick").onclick = () => $("#bulkFiles").click();
 $("#bulkFiles").onchange = () => { [...$("#bulkFiles").files].forEach(addBulkFile); $("#bulkFiles").value = ""; };
 
 function addBulkFile(f) {
   if (!/\.(mp4|mov|m4v|webm)$/i.test(f.name)) return toast(`Skipped ${f.name}: not a video file`, true);
-  bulkItems.push({ src: f, name: f.name, size: f.size, title: titleFromName(f.name), creator: "", link: "", state: "ready" });
+  bulkItems.push({ src: f, name: f.name, size: f.size, title: titleFromName(f.name), creator: "", link: "", tags: "", state: "ready" });
   renderBulk();
 }
 document.addEventListener("change", (e) => {
   const cb = e.target.closest("[data-bdl]"); if (!cb) return;
   const f = downloads[+cb.dataset.bdl];
-  if (cb.checked) bulkItems.push({ src: { serverName: f.name }, dl: f.name, name: f.name, size: f.size,
-    title: titleFromName(f.name), creator: f.creator || "", link: f.link || "", state: "ready" });
+  if (cb.checked) bulkItems.push(bulkFromDownload(f));
   else bulkItems = bulkItems.filter(b => !(b.dl === f.name && b.state === "ready"));
   renderBulk();
 });
@@ -1338,13 +1566,19 @@ function renderBulk() {
     return `<div class="bulk-row ${b.state}" data-bi="${i}">
       <input type="text" class="bt" value="${escapeHtml(b.title)}" placeholder="Title" maxlength="100" ${locked ? "disabled" : ""}>
       <input type="text" class="cr bc" value="${escapeHtml(b.creator)}" placeholder="@creator" ${locked ? "disabled" : ""}>
-      <button class="small-btn" data-brm title="Remove" ${b.state === "sending" ? "disabled" : ""}>✕</button>
+      <span class="rowbtns">
+        <button class="small-btn" data-bai title="Generate a title and tags for this one" ${locked || b.ai === "running" ? "disabled" : ""}>✨</button>
+        <button class="small-btn" data-brm title="Remove" ${b.state === "sending" ? "disabled" : ""}>✕</button>
+      </span>
+      <input type="text" class="btg" value="${escapeHtml(b.tags || "")}" placeholder="Tags for this video (comma-separated)" ${locked ? "disabled" : ""}>
+      ${b.summary ? `<div class="sum">${escapeHtml(b.summary)}</div>` : ""}
       <div class="src">${escapeHtml(b.name)} · ${fmtSize(b.size)}</div>
       ${b.msg ? `<div class="st">${escapeHtml(b.msg)}</div>` : ""}
     </div>`;
   }).join("");
   const ready = bulkItems.filter(b => b.state === "ready").length;
-  $("#bulkGo").disabled = bulkBusy || !ready || bulkItems.some(b => b.state === "ready" && !b.title.trim() && selected().includes("youtube"));
+  $("#bulkGo").disabled = bulkBusy || !ready || bulkItems.some(b => b.ai === "running")
+    || bulkItems.some(b => b.state === "ready" && !b.title.trim() && selected().includes("youtube"));
   $("#bulkGo").textContent = bulkBusy ? "Adding…" : `Add ${ready} to queue`;
 }
 $("#bulkList").addEventListener("input", (e) => {
@@ -1352,12 +1586,43 @@ $("#bulkList").addEventListener("input", (e) => {
   const b = bulkItems[+row.dataset.bi];
   if (e.target.classList.contains("bt")) b.title = e.target.value;
   if (e.target.classList.contains("bc")) b.creator = e.target.value;
+  if (e.target.classList.contains("btg")) b.tags = e.target.value;
   $("#bulkGo").disabled = bulkBusy || !bulkItems.some(x => x.state === "ready");
 });
 $("#bulkList").addEventListener("click", (e) => {
-  const rm = e.target.closest("[data-brm]"); if (!rm) return;
-  bulkItems.splice(+rm.closest("[data-bi]").dataset.bi, 1); renderBulk();
+  const rm = e.target.closest("[data-brm]"), ai = e.target.closest("[data-bai]");
+  if (rm) { bulkItems.splice(+rm.closest("[data-bi]").dataset.bi, 1); renderBulk(); }
+  if (ai && !needAiKey()) bulkSummarize([bulkItems[+ai.closest("[data-bi]").dataset.bi]]);
 });
+
+async function bulkSummarize(items) {
+  const todo = items.filter(b => b.state === "ready" && b.ai !== "running");
+  let next = 0, ok = 0;
+  async function worker() {
+    while (next < todo.length) {
+      const b = todo[next++];
+      b.ai = "running"; b.msg = "✨ Starting…"; renderBulk();
+      try {
+        const r = await summarizeSrc(b.src, b.creator ? `Originally by ${b.creator}` : "", (m) => { b.msg = "✨ " + m; renderBulk(); });
+        b.title = (r.titles[0] || b.title).slice(0, 100);
+        b.tags = mergeTags(b.tags, allTags(r));
+        b.summary = r.summary; b.aiDesc = r.description; b.ai = "done"; b.msg = ""; ok++;
+      } catch (err) { b.ai = "error"; b.msg = err.message; }
+      renderBulk();
+    }
+  }
+  await Promise.all([worker(), worker()]);
+  return ok;
+}
+$("#bulkAi").onclick = async () => {
+  if (needAiKey()) return;
+  const todo = bulkItems.filter(b => b.state === "ready");
+  if (!todo.length) return toast("Add some videos first.", true);
+  $("#bulkAi").disabled = true; $("#bulkGo").disabled = true;
+  const ok = await bulkSummarize(todo);
+  $("#bulkAi").disabled = false; renderBulk();
+  toast(`Generated titles and tags for ${ok} of ${todo.length}`, ok < todo.length);
+};
 
 $("#bulkGo").onclick = async () => {
   bulkBusy = true; renderBulk();
@@ -1365,8 +1630,10 @@ $("#bulkGo").onclick = async () => {
   for (const b of bulkItems.filter(x => x.state === "ready")) {
     b.state = "sending"; b.msg = "Sending…"; renderBulk();
     try {
-      const body = await sendForm(buildForm(b.src, { title: b.title, creator: b.creator, link: b.link, mode: "daily" }),
-        (pct) => { b.msg = `Sending… ${pct}%`; renderBulk(); });
+      const desc = [$("#bulkAiDesc").checked ? (b.aiDesc || "") : "", $("#bulkDesc").value.trim()].filter(Boolean).join("\n\n");
+      const body = await sendForm(buildForm(b.src, { title: b.title, creator: b.creator, link: b.link, mode: "daily",
+          description: desc, tags: mergeTags(b.tags, splitTags($("#bulkTags").value)) }),
+        (pct) => { b.msg = b.src.staged || b.src.serverName ? "Adding…" : `Sending… ${pct}%`; renderBulk(); });
       b.state = "done"; ok++;
       b.msg = `Queued for ${fmtWhen(body.scheduled.when)}${body.scheduled.status === "preparing" ? " (converting in the background)" : ""}`;
     } catch (err) { b.state = "error"; b.msg = err.message; }

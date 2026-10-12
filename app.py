@@ -21,6 +21,7 @@ import downloader
 import media
 import scheduler
 import storage
+import summarizer
 import updater
 import winapp
 from platforms import PLATFORMS
@@ -59,6 +60,18 @@ app.secret_key = _secret_key()
 app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
                   PERMANENT_SESSION_LIFETIME=datetime.timedelta(days=30))
 _login_failures = {}  # ip -> [timestamps]
+STAGING_DIR = os.path.join(storage.DATA_DIR, "staging")  # videos sent from the browser once, reused for AI + posting
+os.makedirs(STAGING_DIR, exist_ok=True)
+
+
+def staged_path(token):
+    """Path of a staged upload by its token, or None (refuses anything outside the staging folder)."""
+    if not token or not re.fullmatch(r"[0-9a-f]{16}", token):
+        return None
+    for name in os.listdir(STAGING_DIR):
+        if name.startswith(token + "_"):
+            return os.path.join(STAGING_DIR, name)
+    return None
 
 _oauth_pending = {}  # state -> (platform, verifier, created_at)
 _jobs = {}
@@ -151,6 +164,7 @@ def api_status():
             "tiktok_has_secret": bool(cfg.get("tiktok", {}).get("client_secret")),
             "instagram_api_host": cfg.get("instagram", {}).get("api_host", "graph.instagram.com"),
             "presets": get_presets(),
+            "ai": summarizer.public_settings(),
             "ffmpeg": media.available(),
         },
     })
@@ -181,11 +195,35 @@ def fill_preset(text, title, creator, link):
     return "\n".join(lines).strip()
 
 
+def parse_tags(raw):
+    """'a, b,#c' -> ['a', 'b', 'c'] (deduplicated, no '#')."""
+    out, seen = [], set()
+    for t in re.split(r"[,\n]", raw or ""):
+        t = re.sub(r"\s+", " ", t.replace("#", "")).strip()
+        if t and t.lower() not in seen:
+            seen.add(t.lower())
+            out.append(t)
+    return out
+
+
+def hashtags(tags, limit):
+    out = []
+    for t in tags:
+        h = "#" + re.sub(r"[^\w]", "", t)
+        if len(h) > 1 and h.lower() not in (x.lower() for x in out):
+            out.append(h)
+        if len(out) >= limit:
+            break
+    return " ".join(out)
+
+
 def build_texts(form, platforms, title, description, creator, link):
     """Per-platform title + description. A per-platform override replaces the description on
     YouTube, and the whole caption (title + description) on Instagram and TikTok."""
     preset = next((p for p in get_presets() if p["id"] == form.get("preset")), None)
     extra = fill_preset(preset["text"], title, creator, link) if preset else ""
+    tags = parse_tags(form.get("tags", ""))
+    as_hashtags = form.get("tags_to_captions") == "1"
     texts = {}
     for p in platforms:
         override = (form.get(f"desc_{p}") or "").strip()
@@ -195,6 +233,9 @@ def build_texts(form, platforms, title, description, creator, link):
             t, d = title, description
         if extra:
             d = f"{d}\n\n{extra}".strip()
+        if as_hashtags and tags:
+            # YouTube shows the first 3 hashtags above the title (and ignores them all past 15)
+            d = f"{d}\n\n{hashtags(tags, 3 if p == 'youtube' else 8)}".strip()
         texts[p] = {"title": t, "description": d}
     return texts
 
@@ -344,11 +385,16 @@ def tiktok_creator_info():
 def api_upload():
     video = request.files.get("video")
     local_name = request.form.get("local_file", "")
+    staged = staged_path(request.form.get("staged", ""))
     if local_name:
         local_path = downloader.safe_path(local_name)
         if not local_path:
             return jsonify(error="That downloaded file isn't there any more."), 400
         filename = local_name
+    elif staged:
+        local_path, filename = None, os.path.basename(staged).split("_", 1)[1]
+    elif request.form.get("staged"):
+        return jsonify(error="That video expired from the app's temporary storage. Add it again."), 400
     elif video and video.filename:
         local_path, filename = None, video.filename
     else:
@@ -376,6 +422,9 @@ def api_upload():
     job_id = uuid.uuid4().hex[:12]
     if local_path:
         path = local_path  # a file from the downloads folder: use it in place, never delete it
+    elif staged:
+        path = os.path.join(storage.TEMP_DIR, f"{job_id}_{secure_filename(filename) or 'video' + ext}")
+        os.replace(staged, path)  # already on the server: no second upload
     else:
         path = os.path.join(storage.TEMP_DIR, f"{job_id}_{secure_filename(filename) or 'video' + ext}")
         video.save(path)
@@ -390,6 +439,7 @@ def api_upload():
             "made_for_kids": form.get("yt_kids") == "1",
             "add_shorts_tag": form.get("yt_shorts_tag") == "1",
             "notify": form.get("yt_notify", "1") == "1",
+            "tags": parse_tags(form.get("tags", "")),
         },
         "instagram": {"share_to_feed": form.get("ig_feed", "1") == "1",
                       "thumb_offset": int(float(form["ig_thumb"])) if form.get("ig_thumb") else None},
@@ -788,6 +838,64 @@ def api_app_quit():
     return jsonify(ok=True)
 
 
+# ---------- AI summaries ----------
+
+@app.post("/api/stage")
+def api_stage():
+    """Send a video from the browser once; the token can then be summarized and posted."""
+    video = request.files.get("video")
+    if not video or not video.filename:
+        return jsonify(error="Pick a video file first."), 400
+    ext = os.path.splitext(video.filename)[1].lower()
+    if ext not in ALLOWED_EXT:
+        return jsonify(error=f"Unsupported file type {ext}. Use MP4, MOV or WebM."), 400
+    token = secrets.token_hex(8)
+    path = os.path.join(STAGING_DIR, f"{token}_{secure_filename(video.filename) or 'video' + ext}")
+    video.save(path)
+    return jsonify(token=token, name=video.filename, size=os.path.getsize(path))
+
+
+@app.post("/api/summarize")
+def api_summarize():
+    body = request.get_json(force=True) or {}
+    source = {}
+    if body.get("local_file"):
+        path = downloader.safe_path(body["local_file"])
+        source = downloader.meta(body["local_file"])
+    else:
+        path = staged_path(body.get("staged", ""))
+    if not path:
+        return jsonify(error="That video isn't on the app any more. Add it again."), 400
+    if not summarizer.settings()["key"]:
+        return jsonify(error="Add a Gemini API key in Settings → AI summaries first (it's free)."), 400
+    hint = str(body.get("hint", ""))[:300]
+    return jsonify(job_id=summarizer.start(path, hint=hint, source=source))
+
+
+@app.get("/api/summarize/<job_id>")
+def api_summarize_job(job_id):
+    job = summarizer.get(job_id)
+    if not job:
+        abort(404)
+    return jsonify(job)
+
+
+@app.post("/api/ai/settings")
+def api_ai_settings():
+    body = request.get_json(force=True) or {}
+    if body.get("clear_key"):
+        summarizer.clear_key()
+    summarizer.save_settings(key=body.get("key"), model=body.get("model"), niche=body.get("niche"),
+                             language=body.get("language"))
+    result = summarizer.public_settings()
+    if body.get("test") or body.get("key"):
+        try:
+            result["resolved_model"] = summarizer.test_key()
+        except summarizer.SummaryError as e:
+            return jsonify(error=str(e), **result), 400
+    return jsonify(result)
+
+
 # ---------- export / import (move to another computer or the home server) ----------
 
 @app.post("/api/transfer/export")
@@ -855,6 +963,13 @@ def _already_running():
 
 
 def _cleanup_leftovers():
+    for name in os.listdir(STAGING_DIR):  # staged videos nobody posted within a day
+        p = os.path.join(STAGING_DIR, name)
+        if time.time() - os.path.getmtime(p) > 86400:
+            try:
+                os.remove(p)
+            except OSError:
+                pass
     for name in os.listdir(storage.TEMP_DIR):
         try:
             os.remove(os.path.join(storage.TEMP_DIR, name))

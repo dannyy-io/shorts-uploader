@@ -1,5 +1,12 @@
 # What's new
 
+## 1.7.0
+- ✨ AI summaries: Gemini watches the video and suggests a summary, 3 titles, a description and tags (post-specific, niche and broad). Set up in Settings → AI summaries with a free key.
+- New Tags field: sent to YouTube's tags; optionally added as hashtags on every platform.
+- Bulk add: shared description and tags, and "Generate titles & tags" for every video.
+- Download tab: paste several links at once, then queue them together; tick downloads and "Queue selected".
+- Videos dragged in from your PC are only sent once, even if you summarize them first.
+
 ## 1.6.1
 - Fix: a fresh install could fail to start with "No module named 'requests'". The launcher now installs the app's packages first, and checks they actually load.
 - Stopping the server in Dockge is now instant (it used to hang for 10 seconds).

@@ -90,6 +90,29 @@ You can leave the Meta app in Development mode — it works for your own account
 
 ---
 
+## AI summaries, titles and tags
+
+Click **✨ Summarize video** on the Upload tab and Google's Gemini AI watches the video, then suggests:
+
+- a short **summary**
+- three **title ideas** (click one to use it)
+- a **description** (Use, or Add to yours)
+- **tags** in three groups: *post-specific* (exactly what this video is), *niche* (your channel's niche) and *broad* (shorts, viral, ...). **Use these tags** fills the **Tags** field.
+
+**Setup (free, one time):** go to <https://aistudio.google.com/apikey>, sign in with Google, click **Create API key**, and paste it into **Settings → ✨ AI summaries**. Also fill in **Your niche** (e.g. `anime edits, AMV`) so niche tags always match your channel. The app picks the newest Gemini Flash model your key can use, and switches automatically when Google retires one.
+
+- The optional box next to the button lets you tell the AI what the video is (e.g. "Demon Slayer AMV"), which helps a lot for music-only edits.
+- For downloaded videos, the original title and creator are passed along as a hint too.
+- A small low-resolution copy of the video is what gets sent to Google, not the full file.
+- The free tier allows a limited number of requests per minute. Bulk runs do two at a time and wait and retry automatically if Google says "slow down".
+
+**Tags:** YouTube gets them in its Tags field (up to its 500-character limit). Instagram and TikTok don't have a tags field, so tick **Also add them as hashtags** to put the best few at the end of the caption (3 on YouTube, up to 8 on Instagram and TikTok).
+
+## Several videos at once
+
+- **Download several links:** paste multiple links into the Download tab (separated by spaces or new lines). When they're done, click **Queue these N…**. You can also tick videos in *Downloaded videos* and click **Queue selected**.
+- **Bulk add** has its own **Description for all** and **Tags for all**. Click **✨ Generate titles & tags** to write a title and tags for every video. Tick **Start each description with its AI caption** if you want each video's own one-liner above the shared description. Then **Add N to queue**, and they fill your next post times.
+
 ## Auto-fix format
 
 Under the video preview, **Auto-fix format** (on by default) makes every clip upload-ready: 1080×1920, H.264 video, AAC audio, MP4.
@@ -180,6 +203,7 @@ updater.py          checks GitHub and swaps in new versions
 winapp.py           app window, tray icon, Windows pop-ups
 install.py          Install.bat / Uninstall.bat
 transfer.py         Export / import (move to another computer or the server)
+summarizer.py       AI summaries, titles and tags (Google Gemini)
 server/             Docker/Dockge stack and its first-start script
 downloader.py       the Download tab (yt-dlp)
 scheduler.py        the posting queue, background conversion and Start-with-Windows
