@@ -1,5 +1,8 @@
 # What's new
 
+## 1.4.1
+- More reliable update checks (falls back to GitHub's API if needed).
+
 ## 1.4.0
 - Installs like a real app: Start Menu and desktop icon, opens in its own window.
 - Updates itself automatically from GitHub, and rolls back if an update won't start.

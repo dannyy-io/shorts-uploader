@@ -17,6 +17,7 @@ REPO = "dannyy-io/shorts-uploader"
 BRANCH = "main"
 VERSION_URL = f"https://raw.githubusercontent.com/{REPO}/{BRANCH}/VERSION"
 ZIP_URL = f"https://codeload.github.com/{REPO}/zip/refs/heads/{BRANCH}"
+API_VERSION_URL = f"https://api.github.com/repos/{REPO}/contents/VERSION?ref={BRANCH}"  # backup route
 if os.environ.get("SHORTS_UPLOADER_UPDATE_BASE"):  # testing only: a local stand-in for GitHub
     VERSION_URL = os.environ["SHORTS_UPLOADER_UPDATE_BASE"] + "/VERSION"
     ZIP_URL = os.environ["SHORTS_UPLOADER_UPDATE_BASE"] + "/zip"
@@ -73,14 +74,24 @@ def auto_enabled():
 
 def check(timeout=8):
     """Return the newest version on GitHub (string), or raise UpdateError."""
-    try:
-        r = requests.get(VERSION_URL, params={"t": int(time.time())}, timeout=timeout,
-                         headers={"Cache-Control": "no-cache"})
-    except requests.RequestException as e:
-        raise UpdateError(f"Couldn't reach GitHub ({type(e).__name__}).")
-    if r.status_code != 200:
-        raise UpdateError(f"GitHub answered {r.status_code} when checking for updates.")
-    latest = r.text.strip()
+    problem = None
+    latest = None
+    for url, headers in ((VERSION_URL, {"Cache-Control": "no-cache"}),
+                         (API_VERSION_URL, {"Accept": "application/vnd.github.raw"})):
+        if url == API_VERSION_URL and os.environ.get("SHORTS_UPLOADER_UPDATE_BASE"):
+            break
+        try:
+            r = requests.get(url, params={"t": int(time.time())} if url == VERSION_URL else None,
+                             timeout=timeout, headers=headers)
+        except requests.RequestException as e:
+            problem = f"Couldn't reach GitHub ({type(e).__name__})."
+            continue
+        if r.status_code == 200:
+            latest = r.text.strip()
+            break
+        problem = f"GitHub answered {r.status_code} when checking for updates."
+    if latest is None:
+        raise UpdateError(problem or "Couldn't check for updates.")
     if parse(latest) == (0,):
         raise UpdateError("The version on GitHub looks wrong; not updating.")
     save_state(last_check=time.time(), latest=latest)
