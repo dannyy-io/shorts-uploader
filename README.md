@@ -106,6 +106,14 @@ Click **✨ Summarize video** on the Upload tab and Google's Gemini AI watches t
 - A small low-resolution copy of the video is what gets sent to Google, not the full file.
 - The free tier allows a limited number of requests per minute. Bulk runs do two at a time and wait and retry automatically if Google says "slow down".
 
+**If the key isn't accepted:** the app tries every way Google accepts keys and remembers whichever works. If it still says "didn't accept the API key", Settings shows Google's exact reason. Google's AI Studio now only makes the new **`AQ.`** keys, which some accounts can't use with Gemini yet. The reliable fix is a classic key from the Google Cloud project you already made for YouTube:
+
+1. Open <https://console.cloud.google.com> and pick your project at the top.
+2. Go to **APIs & Services → Library**, search for **Generative Language API**, and click **Enable**.
+3. Go to **APIs & Services → Credentials → + Create credentials → API key**.
+4. Click the new key, and under **API restrictions** choose **Restrict key**, tick **Generative Language API**, and **Save**. Google rejects classic keys that aren't restricted.
+5. Copy the key (it starts with `AIza`) and paste it into Settings → ✨ AI summaries.
+
 **Tags:** YouTube gets them in its Tags field (up to its 500-character limit). Instagram and TikTok don't have a tags field, so tick **Also add them as hashtags** to put the best few at the end of the caption (3 on YouTube, up to 8 on Instagram and TikTok).
 
 ## Several videos at once

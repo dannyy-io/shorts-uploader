@@ -1402,18 +1402,26 @@ function renderAiSettings() {
   const ai = state.settings.ai || {};
   $("#aiNiche").value = ai.niche || ""; $("#aiModel").value = ai.model || ""; $("#aiLang").value = ai.language || "";
   $("#aiKey").placeholder = ai.has_key ? "•••••• saved" : "Paste key";
-  $("#s_ai").className = "status-line" + (ai.has_key ? " on" : "");
-  $("#s_ai").textContent = ai.has_key ? `Ready${ai.resolved_model ? " · using " + ai.resolved_model : ""}` : "No key yet.";
+  if (aiError && ai.has_key) {
+    $("#s_ai").className = "status-line"; $("#s_ai").style.color = "var(--err)"; $("#s_ai").textContent = aiError;
+  } else {
+    $("#s_ai").style.color = "";
+    $("#s_ai").className = "status-line" + (ai.has_key ? " on" : "");
+    const how = { header: "", bearer: " · key sent as a token", query: " · key sent in the address" }[ai.auth] || "";
+    $("#s_ai").textContent = ai.has_key
+      ? `Ready${ai.resolved_model ? " · using " + ai.resolved_model : ""} · ${ai.key_kind} key${how}` : "No key yet.";
+  }
   $("#aiRemove").hidden = !ai.has_key;
 }
+let aiError = null;
 async function saveAi(extra = {}) {
   const body = { niche: $("#aiNiche").value, model: $("#aiModel").value, language: $("#aiLang").value, test: true, ...extra };
   if ($("#aiKey").value.trim()) body.key = $("#aiKey").value.trim();
   $("#aiSave").disabled = true; $("#s_ai").textContent = "Checking with Google…";
   try {
     const r = await api("/api/ai/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-    $("#aiKey").value = ""; toast(r.resolved_model ? `AI summaries ready (${r.resolved_model})` : "Saved");
-  } catch (e) { toast(e.message, true); }
+    $("#aiKey").value = ""; aiError = null; toast(r.resolved_model ? `AI summaries ready (${r.resolved_model})` : "Saved");
+  } catch (e) { aiError = e.message; $("#aiKey").value = ""; toast("Gemini didn't accept the key. Details are in Settings.", true); }
   $("#aiSave").disabled = false;
   applyStatus(await api("/api/status"));
 }

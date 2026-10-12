@@ -1,5 +1,9 @@
 # What's new
 
+## 1.7.1
+- AI summaries work with Google's new "AQ." API keys: the app tries each way Google accepts a key and remembers the one that works.
+- When Gemini rejects a key, Settings now shows Google's exact reason, plus what to do about it.
+
 ## 1.7.0
 - ✨ AI summaries: Gemini watches the video and suggests a summary, 3 titles, a description and tags (post-specific, niche and broad). Set up in Settings → AI summaries with a free key.
 - New Tags field: sent to YouTube's tags; optionally added as hashtags on every platform.
