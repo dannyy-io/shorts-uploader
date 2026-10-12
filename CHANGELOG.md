@@ -1,5 +1,9 @@
 # What's new
 
+## 1.5.0
+- Several post times per day (e.g. 12 AM and 12 PM): set them in the Queue tab. "Next open slot" fills them in order.
+- "What's new" after an update now shows the notes for the version you got.
+
 ## 1.4.1
 - More reliable update checks (falls back to GitHub's API if needed).
 

@@ -455,7 +455,7 @@ def _queue_payload():
     return jsonify({
         "items": scheduler.items(),
         "next_slot": scheduler.next_daily_slot(),
-        "daily_time": scheduler.settings()["daily_time"],
+        "daily_times": scheduler.settings()["daily_times"],
         "autostart": scheduler.autostart_enabled(),
         "autostart_supported": scheduler.autostart_supported(),
     })
@@ -470,7 +470,9 @@ def api_queue():
 def api_queue_settings():
     body = request.get_json(force=True) or {}
     try:
-        if "daily_time" in body:
+        if "daily_times" in body:
+            scheduler.set_daily_times(body["daily_times"] or [])
+        elif "daily_time" in body:
             scheduler.set_daily_time(body["daily_time"])
         if "autostart" in body:
             scheduler.set_autostart(bool(body["autostart"]))
@@ -566,14 +568,16 @@ def _refresh_downloader_daily():
         downloader.install()
 
 
-def _changelog_top():
+def _changelog_for(version):
+    """The CHANGELOG section for this version (falls back to the newest one)."""
     try:
         with open(os.path.join(storage.BASE_DIR, "CHANGELOG.md"), encoding="utf-8") as f:
             text = f.read()
     except OSError:
         return ""
-    parts = re.split(r"^## ", text, flags=re.M)
-    return ("## " + parts[1]).strip() if len(parts) > 1 else ""
+    sections = ["## " + p.strip() for p in re.split(r"^## ", text, flags=re.M)[1:]]
+    match = next((sec for sec in sections if sec.splitlines()[0].strip("# ").strip() == version), None)
+    return match or (sections[0] if sections else "")
 
 
 @app.get("/api/app")
@@ -593,7 +597,7 @@ def api_app():
         "launched": LAUNCHED,
         "restarting": _app_state["restarting"],
         "just_updated": just if just == updater.local_version() else None,
-        "whats_new": _changelog_top() if just else "",
+        "whats_new": _changelog_for(updater.local_version()) if just else "",
         "rolled_back_from": st.get("rolled_back_from"),
         "repo": updater.REPO,
     })

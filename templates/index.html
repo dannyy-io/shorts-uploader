@@ -200,6 +200,13 @@
   .q-settings { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; font-size: 14px; }
   .q-settings label { display: inline-flex; gap: 8px; align-items: center; }
   .q-settings input[type=time] { width: auto; padding: 6px 10px; }
+  .times-wrap { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .times { display: flex; gap: 8px; flex-wrap: wrap; }
+  .time-chip { display: inline-flex; align-items: center; gap: 2px; background: var(--panel-2); border: 1px solid var(--line);
+               border-radius: 10px; padding: 2px 2px 2px 4px; }
+  .time-chip input { border: 0; background: transparent; padding: 5px 4px; width: auto; }
+  .time-chip button { background: none; border: 0; color: var(--muted); cursor: pointer; padding: 4px 8px; border-radius: 7px; }
+  .time-chip button:hover { color: var(--err); background: var(--panel); }
   .q-item { padding: 12px 0; border-top: 1px solid var(--line); display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; align-items: start; }
   .q-item:first-of-type { border-top: 0; }
   .q-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -376,14 +383,14 @@
       <div class="seg" role="radiogroup" aria-label="When to post">
         <label><input type="radio" name="when" value="now" checked>Post now</label>
         <label><input type="radio" name="when" value="at">Pick a time</label>
-        <label><input type="radio" name="when" value="daily">Next daily slot</label>
+        <label><input type="radio" name="when" value="daily">Next open slot</label>
       </div>
       <div class="when-detail" id="whenAt" hidden>
         <input type="datetime-local" id="whenTime">
       </div>
       <div class="when-detail" id="whenDaily" hidden>
         <span>Goes out <b id="nextSlot">…</b></span>
-        <button class="connect-link" type="button" data-goto-queue>change daily time</button>
+        <button class="connect-link" type="button" data-goto-queue>change post times</button>
       </div>
     </div>
 
@@ -438,7 +445,10 @@
 <main id="queueView" hidden>
   <section class="card">
     <div class="q-settings">
-      <label>Daily post time <input type="time" id="dailyTime" value="18:00"></label>
+      <div class="times-wrap"><span>Post times, every day</span>
+        <div id="timesList" class="times"></div>
+        <button class="small-btn" type="button" id="addTime">+ Add time</button>
+      </div>
       <label id="autostartWrap"><span class="switch"><input type="checkbox" id="autostart"><span></span></span> Start this app when Windows starts</label>
     </div>
     <p class="fineprint">Scheduled posts go out while this app is running and your PC is awake. If the PC was off or asleep at post time, the post goes out as soon as the app is running again.</p>
@@ -446,7 +456,7 @@
 
   <section class="card">
     <div class="files-head"><h2>Scheduled</h2></div>
-    <div id="qList"><div class="empty">Nothing scheduled. On the Upload tab, pick “Pick a time” or “Next daily slot”.</div></div>
+    <div id="qList"><div class="empty">Nothing scheduled. On the Upload tab, pick “Pick a time” or “Next open slot”.</div></div>
   </section>
 </main>
 
@@ -517,7 +527,7 @@
 <dialog id="bulk">
   <div class="dlg-head"><h2>Bulk add to queue</h2><button class="icon-btn" id="closeBulk">Close</button></div>
   <div class="dlg-body">
-    <p class="fineprint">Each video gets the next free daily slot, starting <b id="bulkStart">…</b>. They use the platforms, description, preset, per-platform captions and auto-fix settings on the Upload tab. Edit titles and credits below.</p>
+    <p class="fineprint">Each video gets the next open post time, starting <b id="bulkStart">…</b>. They use the platforms, description, preset, per-platform captions and auto-fix settings on the Upload tab. Edit titles and credits below.</p>
     <div class="row">
       <button class="ghost" id="bulkPick">Add files from PC…</button>
       <input type="file" id="bulkFiles" multiple hidden accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.m4v,.webm">
@@ -1128,7 +1138,7 @@ async function loadQueue() {
   const active = queue.items.filter(i => i.status !== "done");
   $("#qCount").hidden = !active.length; $("#qCount").textContent = active.length;
   $("#nextSlot").textContent = fmtWhen(queue.next_slot);
-  if (document.activeElement !== $("#dailyTime")) $("#dailyTime").value = queue.daily_time;
+  if (!(document.activeElement && document.activeElement.matches("#timesList input"))) renderTimes(queue.daily_times || []);
   $("#autostartWrap").hidden = !queue.autostart_supported;
   $("#autostart").checked = queue.autostart;
   if ($("#queueView").hidden) return;
@@ -1158,7 +1168,7 @@ async function loadQueue() {
       ${errors.length ? `<div class="q-msg">${errors.map(([p, r]) => `${p === "_video" ? "Video" : NAMES[p]}: ${escapeHtml(r.message)}`).join("<br>")}
         <br><span style="color:var(--muted)">${i.prep_error ? "Retry tries converting the video again." : "Retrying only re-posts the platforms that failed."}</span></div>` : ""}
     </div>`;
-  }).join("") : `<div class="empty">Nothing scheduled. On the Upload tab, pick “Pick a time” or “Next daily slot”.</div>`;
+  }).join("") : `<div class="empty">Nothing scheduled. On the Upload tab, pick “Pick a time” or “Next open slot”.</div>`;
 }
 
 async function queueAction(id, action, body) {
@@ -1188,7 +1198,7 @@ document.addEventListener("click", (e) => {
     };
   }
 });
-document.addEventListener("click", (e) => { if (e.target.closest("[data-goto-queue]")) { showTab("queue"); $("#dailyTime").focus(); } });
+document.addEventListener("click", (e) => { if (e.target.closest("[data-goto-queue]")) { showTab("queue"); $("#addTime").focus(); } });
 
 async function saveQueueSettings(body) {
   try {
@@ -1197,7 +1207,23 @@ async function saveQueueSettings(body) {
   } catch (e) { toast(e.message, true); }
   loadQueue();
 }
-$("#dailyTime").addEventListener("change", () => $("#dailyTime").value && saveQueueSettings({ daily_time: $("#dailyTime").value }));
+function renderTimes(times) {
+  $("#timesList").innerHTML = times.map((t, i) => `<span class="time-chip">
+      <input type="time" value="${t}" data-ti="${i}" aria-label="Post time ${i + 1}">
+      ${times.length > 1 ? `<button type="button" data-trm="${i}" title="Remove this time">✕</button>` : ""}</span>`).join("");
+}
+function readTimes() { return $$("#timesList input").map(i => i.value).filter(Boolean); }
+$("#timesList").addEventListener("change", () => saveQueueSettings({ daily_times: readTimes() }));
+$("#timesList").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-trm]"); if (!b) return;
+  const t = readTimes(); t.splice(+b.dataset.trm, 1); saveQueueSettings({ daily_times: t });
+});
+$("#addTime").onclick = () => {
+  const t = readTimes();
+  const used = new Set(t);
+  const pick = ["00:00", "12:00", "18:00", "09:00", "15:00", "21:00", "06:00", "03:00"].find(x => !used.has(x)) || "12:00";
+  saveQueueSettings({ daily_times: t.concat(pick) });
+};
 $("#autostart").addEventListener("change", () => saveQueueSettings({ autostart: $("#autostart").checked }));
 
 document.querySelectorAll('input[name="when"]').forEach(r => r.addEventListener("change", () => {

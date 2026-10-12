@@ -30,14 +30,32 @@ _prep_queue = _queue.Queue()
 
 def settings():
     cfg = storage.get_section("config", "schedule")
-    return {"daily_time": cfg.get("daily_time", "18:00")}
+    times = cfg.get("daily_times") or [cfg.get("daily_time", "18:00")]  # older versions had one time
+    return {"daily_times": sorted(set(times))}
 
 
-def set_daily_time(value):
-    hh, mm = value.split(":")
-    if not (0 <= int(hh) <= 23 and 0 <= int(mm) <= 59):
-        raise ValueError("Pick a valid time")
-    storage.update_section("config", "schedule", daily_time=f"{int(hh):02d}:{int(mm):02d}")
+def _clean_time(value):
+    try:
+        hh, mm = str(value).strip().split(":")[:2]
+        hh, mm = int(hh), int(mm)
+    except ValueError:
+        raise ValueError(f"'{value}' isn't a valid time")
+    if not (0 <= hh <= 23 and 0 <= mm <= 59):
+        raise ValueError(f"'{value}' isn't a valid time")
+    return f"{hh:02d}:{mm:02d}"
+
+
+def set_daily_times(values):
+    times = sorted({_clean_time(v) for v in values})
+    if not times:
+        raise ValueError("Keep at least one post time.")
+    if len(times) > 24:
+        raise ValueError("That's a lot of posts per day; the limit here is 24.")
+    storage.update_section("config", "schedule", daily_times=times, daily_time=times[0])
+
+
+def set_daily_time(value):  # kept for older callers
+    set_daily_times([value])
 
 
 # ---------- queue storage ----------
@@ -63,16 +81,17 @@ def _edit(item_id, fn):
 
 
 def next_daily_slot(now=None):
-    """Next day (today included, if the time hasn't passed) with nothing scheduled, at the daily time."""
-    hh, mm = map(int, settings()["daily_time"].split(":"))
+    """The next post time (from the daily times list) that nothing is scheduled for yet."""
+    times = [tuple(map(int, t.split(":"))) for t in settings()["daily_times"]]
     now = now or time.time()
-    # every post still in the queue holds its day, including ones converting or waiting for a retry
-    taken = {dt.date.fromtimestamp(i["when"]) for i in items() if i["status"] != "done"}
+    # every post still in the queue holds its slot, including ones converting or waiting for a retry
+    taken = {int(i["when"] // 60) for i in items() if i["status"] != "done"}
     day = dt.date.fromtimestamp(now)
     for _ in range(3660):
-        slot = dt.datetime.combine(day, dt.time(hh, mm)).timestamp()
-        if slot > now + 60 and day not in taken:
-            return slot
+        for hh, mm in times:
+            slot = dt.datetime.combine(day, dt.time(hh, mm)).timestamp()
+            if slot > now + 60 and int(slot // 60) not in taken:
+                return slot
         day += dt.timedelta(days=1)
     raise ValueError("Queue is full")
 
