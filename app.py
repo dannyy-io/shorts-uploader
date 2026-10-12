@@ -3,6 +3,8 @@ and TikTok from a single local page.
 
 Run:  python app.py   then open http://127.0.0.1:5005
 """
+import datetime
+import hmac
 import os
 import re
 import secrets
@@ -12,7 +14,7 @@ import time
 import uuid
 from urllib.parse import quote
 
-from flask import Flask, abort, jsonify, redirect, render_template, request, send_file
+from flask import Flask, Response, abort, jsonify, redirect, render_template, request, send_file, session
 from werkzeug.utils import secure_filename
 
 import downloader
@@ -24,13 +26,39 @@ import winapp
 from platforms import PLATFORMS
 from platforms.common import UploadError, new_verifier
 
-HOST = "127.0.0.1"
+SERVER = os.environ.get("SHORTS_UPLOADER_SERVER") == "1"  # running on a home server / in Docker
+HOST = "0.0.0.0" if SERVER else "127.0.0.1"
 PORT = int(os.environ.get("SHORTS_UPLOADER_PORT", "5005"))
-BASE_URL = f"http://{HOST}:{PORT}"
+BASE_URL = f"http://127.0.0.1:{PORT}"
+# Sign-in redirects must match what's registered with Google/TikTok, so they always point at 127.0.0.1:5005.
+REDIRECT_BASE = os.environ.get("SHORTS_UPLOADER_REDIRECT_BASE", "http://127.0.0.1:5005")
+PASSWORD = os.environ.get("SHORTS_UPLOADER_PASSWORD", "")
+PLACEHOLDER_PASSWORDS = {"", "change-me", "changeme", "password"}
 ALLOWED_EXT = {".mp4", ".mov", ".m4v", ".webm"}
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 4 * 1024 ** 3  # 4 GB
+
+
+def _secret_key():
+    path = os.path.join(storage.DATA_DIR, "secret_key")
+    try:
+        with open(path, "rb") as f:
+            key = f.read()
+            if len(key) >= 32:
+                return key
+    except OSError:
+        pass
+    key = os.urandom(32)
+    with open(path, "wb") as f:
+        f.write(key)
+    return key
+
+
+app.secret_key = _secret_key()
+app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
+                  PERMANENT_SESSION_LIFETIME=datetime.timedelta(days=30))
+_login_failures = {}  # ip -> [timestamps]
 
 _oauth_pending = {}  # state -> (platform, verifier, created_at)
 _jobs = {}
@@ -42,21 +70,71 @@ def _home_error(msg):
 
 
 def redirect_uri(platform):
-    return f"{BASE_URL}/callback/{platform}"
+    return f"{REDIRECT_BASE}/callback/{platform}"
+
+
+OPEN_ENDPOINTS = {"login", "login_post", "static"}
 
 
 @app.before_request
-def local_only():
-    # Block other websites from talking to this server (DNS rebinding / CSRF).
-    if request.host.split(":")[0] not in ("127.0.0.1", "localhost"):
-        abort(403)
+def guard():
+    if SERVER:
+        # Reachable from the network: everything needs the password.
+        if PASSWORD in PLACEHOLDER_PASSWORDS:
+            return render_template("login.html", setup_needed=True), 503
+        if request.endpoint in OPEN_ENDPOINTS:
+            return None
+        if not session.get("ok"):
+            if request.path.startswith("/api/") or request.path.startswith("/files/"):
+                return jsonify(error="Please log in again."), 401
+            return redirect("/login")
+    elif request.host.split(":")[0] not in ("127.0.0.1", "localhost"):
+        abort(403)  # PC app: only this computer may talk to it (blocks DNS-rebinding tricks)
+    # Other websites can't send this header, so they can't make the app do anything.
     if request.method == "POST" and request.headers.get("X-Shorts-Uploader") != "1":
         abort(403)
 
 
+@app.get("/login")
+def login():
+    if not SERVER:
+        return redirect("/")
+    return render_template("login.html", setup_needed=False, error=None)
+
+
+@app.post("/login")
+def login_post():
+    if not SERVER:
+        abort(404)
+    ip = request.remote_addr or "?"
+    now = time.time()
+    recent = [t for t in _login_failures.get(ip, []) if now - t < 900]
+    if len(recent) >= 8:
+        return render_template("login.html", setup_needed=False,
+                               error="Too many wrong passwords. Wait 15 minutes and try again."), 429
+    given = request.form.get("password", "")
+    if hmac.compare_digest(given.encode(), PASSWORD.encode()):
+        _login_failures.pop(ip, None)
+        session.clear()
+        session.permanent = True
+        session["ok"] = True
+        return redirect("/")
+    recent.append(now)
+    _login_failures[ip] = recent
+    time.sleep(1)
+    return render_template("login.html", setup_needed=False, error="That password isn't right."), 401
+
+
+@app.post("/api/logout")
+def api_logout():
+    session.clear()
+    return jsonify(ok=True)
+
+
 @app.get("/")
 def index():
-    return render_template("index.html", redirect_uris={p: redirect_uri(p) for p in ("youtube", "tiktok")})
+    return render_template("index.html", redirect_uris={p: redirect_uri(p) for p in ("youtube", "tiktok")},
+                           server=SERVER)
 
 
 # ---------- settings & accounts ----------
@@ -167,26 +245,80 @@ def api_disconnect(platform):
     return api_status()
 
 
-@app.get("/connect/<platform>")
-def connect(platform):
+def _start_oauth(platform):
     mod = PLATFORMS.get(platform)
     if not mod or not mod.USES_OAUTH:
         abort(404)
     if not mod.status()["configured"]:
-        return _home_error(f"Add your {mod.NAME} app credentials in Settings first.")
+        raise UploadError(f"Add your {mod.NAME} app credentials in Settings first.")
     now = time.time()
     for k, v in list(_oauth_pending.items()):
-        if now - v[2] > 600:
+        if now - v[2] > 1800:
             _oauth_pending.pop(k, None)
     state, verifier = secrets.token_urlsafe(24), new_verifier()
     _oauth_pending[state] = (platform, verifier, now)
-    return redirect(mod.auth_url(redirect_uri(platform), state, verifier))
+    return mod.auth_url(redirect_uri(platform), state, verifier)
+
+
+@app.get("/connect/<platform>")
+def connect(platform):
+    try:
+        return redirect(_start_oauth(platform))
+    except UploadError as e:
+        return _home_error(str(e))
+
+
+@app.post("/api/oauth/start/<platform>")
+def api_oauth_start(platform):
+    try:
+        return jsonify(url=_start_oauth(platform))
+    except UploadError as e:
+        return jsonify(error=str(e)), 400
+
+
+@app.post("/api/oauth/finish")
+def api_oauth_finish():
+    """Finish a sign-in from the address the browser landed on (used when the app runs on a server)."""
+    from urllib.parse import parse_qs, urlparse
+    raw = ((request.get_json(force=True) or {}).get("url") or "").strip()
+    query = urlparse(raw).query if "://" in raw else raw.lstrip("?")
+    params = {k: v[0] for k, v in parse_qs(query).items()}
+    pending = _oauth_pending.get(params.get("state", ""))
+    if not params.get("code") and not params.get("error"):
+        return jsonify(error="That doesn't look like the sign-in address. Copy the whole address from the "
+                             "page you landed on after signing in (it starts with http://127.0.0.1)."), 400
+    if not pending:
+        return jsonify(error="That sign-in has expired or was already used. Click Connect again."), 400
+    platform = pending[0]
+    if params.get("error"):
+        _oauth_pending.pop(params["state"], None)
+        return jsonify(error=f"{PLATFORMS[platform].NAME} sign-in was cancelled: "
+                             f"{params.get('error_description') or params['error']}"), 400
+    try:
+        PLATFORMS[platform].finish_auth(params["code"], redirect_uri(platform), pending[1])
+    except UploadError as e:
+        return jsonify(error=str(e)), 400
+    _oauth_pending.pop(params["state"], None)
+    return jsonify(connected=platform, name=PLATFORMS[platform].NAME)
 
 
 @app.get("/callback/<platform>")
 def callback(platform):
     pending = _oauth_pending.pop(request.args.get("state", ""), None)
     if not pending or pending[0] != platform:
+        if request.args.get("code") and request.args.get("state"):
+            # Probably a sign-in started on the home-server copy that landed on this PC's copy:
+            # show the address so it can be pasted into the server.
+            from markupsafe import escape
+            url = escape(request.url)
+            return (f"""<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Shorts Uploader</title><body style="font:15px/1.5 system-ui;max-width:640px;margin:40px auto;padding:0 16px">
+<h2>Finish connecting on your other copy</h2>
+<p>This sign-in was started from another copy of Shorts Uploader (for example your home server).
+Copy the address below and paste it into the <b>Connect</b> box there.</p>
+<textarea readonly onclick="this.select()" style="width:100%;height:110px;font:13px monospace">{url}</textarea>
+<p><button onclick="navigator.clipboard.writeText(document.querySelector('textarea').value);this.textContent='Copied'">Copy</button></p>
+</body>""", 200)
         return _home_error("Sign-in session expired or didn't match. Try Connect again.")
     if request.args.get("error"):
         msg = request.args.get("error_description") or request.args.get("error")
@@ -437,8 +569,34 @@ def api_downloads_delete():
 
 @app.post("/api/downloads/open-folder")
 def api_downloads_open():
+    if SERVER:
+        return jsonify(error="The downloads folder is on the server."), 400
     downloader.open_folder()
     return jsonify(ok=True)
+
+
+@app.post("/api/downloader/cookies")
+def api_downloader_cookies():
+    """Upload a cookies.txt (lets downloads use your logins, e.g. for Instagram)."""
+    f = request.files.get("cookies")
+    if not f:
+        return jsonify(error="Choose a cookies.txt file."), 400
+    data = f.read(5 * 1024 * 1024)
+    text = data.decode("utf-8", "replace")
+    if "\t" not in text or not any(d in text for d in (".instagram.com", ".youtube.com", ".tiktok.com", "Netscape")):
+        return jsonify(error="That doesn't look like a cookies.txt export."), 400
+    with open(downloader.COOKIES_FILE, "wb") as out:
+        out.write(data)
+    return jsonify(downloader.status())
+
+
+@app.post("/api/downloader/cookies/delete")
+def api_downloader_cookies_delete():
+    try:
+        os.remove(downloader.COOKIES_FILE)
+    except OSError:
+        pass
+    return jsonify(downloader.status())
 
 
 @app.get("/files/<path:name>")
@@ -595,6 +753,7 @@ def api_app():
         "last_check": st.get("last_check"),
         "error": _app_state["error"],
         "launched": LAUNCHED,
+        "server": SERVER,
         "restarting": _app_state["restarting"],
         "just_updated": just if just == updater.local_version() else None,
         "whats_new": _changelog_for(updater.local_version()) if just else "",
@@ -623,8 +782,70 @@ def api_app_settings():
 
 @app.post("/api/app/quit")
 def api_app_quit():
+    if SERVER:
+        return jsonify(error="On the server, stop it from Dockge instead."), 400
     _exit_soon(0)
     return jsonify(ok=True)
+
+
+# ---------- export / import (move to another computer or the home server) ----------
+
+@app.post("/api/transfer/export")
+def api_transfer_export():
+    import transfer
+    body = request.get_json(silent=True) or {}
+    for name in os.listdir(storage.TEMP_DIR):  # tidy up any earlier exports that weren't removed
+        old = os.path.join(storage.TEMP_DIR, name)
+        if name.startswith("export_") and time.time() - os.path.getmtime(old) > 600:
+            try:
+                os.remove(old)
+            except OSError:
+                pass
+    path, count = transfer.export(include_queue=bool(body.get("queue", True)),
+                                  move_queue=bool(body.get("move", False)))
+    def stream():  # send the file, then delete it (also if the download is cancelled)
+        try:
+            with open(path, "rb") as f:
+                while True:
+                    chunk = f.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    yield chunk
+        finally:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+    name = f"shorts-uploader-backup-{time.strftime('%Y-%m-%d')}.zip"
+    return Response(stream(), mimetype="application/zip", headers={
+        "Content-Disposition": f'attachment; filename="{name}"',
+        "Content-Length": str(os.path.getsize(path)),
+        "X-Queue-Count": str(count),
+    })
+
+
+@app.post("/api/transfer/import")
+def api_transfer_import():
+    import transfer
+    f = request.files.get("backup")
+    if not f:
+        return jsonify(error="Choose the backup .zip file."), 400
+    tmp = os.path.join(storage.TEMP_DIR, f"import_{uuid.uuid4().hex[:8]}.zip")
+    f.save(tmp)
+    try:
+        with open(tmp, "rb") as fh:
+            summary = transfer.import_zip(fh)
+    except transfer.TransferError as e:
+        return jsonify(error=str(e)), 400
+    except (ValueError, KeyError) as e:
+        return jsonify(error=f"That backup couldn't be read ({e})."), 400
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+    return jsonify(summary)
 
 
 def _already_running():
@@ -666,6 +887,12 @@ if __name__ == "__main__":
     if os.environ.get("SHORTS_UPLOADER_NO_BROWSER") != "1":
         threading.Timer(1.0, lambda: winapp.open_window(BASE_URL)).start()
     queued = sum(1 for i in scheduler.items() if i["status"] == "scheduled")
-    print(f"\n  Shorts Uploader running at {BASE_URL}\n  Close this window to stop it"
-          f"{f' (scheduled posts only go out while it runs; {queued} waiting)' if queued else ''}.\n")
+    if SERVER:
+        print(f"\n  Shorts Uploader (server mode) listening on port {PORT}. Open http://<this-server>:{PORT}"
+              f"{f' — {queued} scheduled post(s) waiting' if queued else ''}\n", flush=True)
+        if PASSWORD in PLACEHOLDER_PASSWORDS:
+            print("  !! Set SHORTS_UPLOADER_PASSWORD in the compose file before using it. !!\n", flush=True)
+    else:
+        print(f"\n  Shorts Uploader running at {BASE_URL}\n  Close this window to stop it"
+              f"{f' (scheduled posts only go out while it runs; {queued} waiting)' if queued else ''}.\n")
     app.run(host=HOST, port=PORT, debug=False, threaded=True)

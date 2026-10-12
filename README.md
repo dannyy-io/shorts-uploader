@@ -28,6 +28,25 @@ The first time, Settings opens on its own. Each platform needs a one-time "devel
 
 ---
 
+## Run it on a home server (posts even when your PC is off)
+
+Scheduled posts only go out while the app is running. To post at 12 AM with your PC off, run it on an always-on machine with Docker (a home server with **Dockge** is ideal).
+
+1. **Create the stack.** In Dockge click **+ Compose**, name it `shorts-uploader`, and paste in the contents of [`server/compose.yaml`](server/compose.yaml).
+2. **Pick a password.** Change `change-me` next to `SHORTS_UPLOADER_PASSWORD`. If your server isn't in Pacific time, change `TZ` too (post times use it). Click **Deploy**.
+3. **Wait for the first start.** It downloads the app and installs what it needs, which takes a few minutes. The log shows `listening on port 5005` when it's ready.
+4. **Open it** from any device on your home network: `http://<server-name>:5005` (for example `http://familyhomeserver:5005`), and log in.
+5. **Bring your setup over** from the PC app:
+   - On the **PC app**, go to Settings → *Move to another computer or the home server*, tick **Move the queue**, and click **Export…**.
+   - On the **server**, go to Settings → **Import a backup…** and pick that file. Your accounts, presets, post times, history and queue come across.
+   - Then on the PC, quit the app from the tray and turn off *Start with Windows* (Queue tab), so only the server posts.
+6. **Connecting accounts on the server** (if you didn't import them): YouTube and TikTok sign-ins finish on an address starting with `http://127.0.0.1:5005/callback`, which won't load because that address means "this device". That's expected. Copy that address and paste it into the box the app shows. If the PC app happens to be running, it shows you the address to copy instead.
+7. **Downloads that need a login** (common on Instagram): on the server, use **Upload cookies.txt** in the Download tab instead of "Use my browser login". See *Downloading videos* below.
+
+**Updates** happen on their own, the same as on the PC. Everything lives in the stack folder (`/opt/stacks/shorts-uploader/app`), so redeploying or updating the stack in Dockge keeps your data.
+
+**Keep it private:** don't forward port 5005 on your router. To use it away from home, connect to your home network with a VPN first (WireGuard, for example).
+
 ## 1. YouTube
 
 1. Go to <https://console.cloud.google.com/>, create a new project (any name, e.g. "Shorts Uploader").
@@ -160,6 +179,8 @@ launcher.py         starts the app, installs updates, rolls back bad ones
 updater.py          checks GitHub and swaps in new versions
 winapp.py           app window, tray icon, Windows pop-ups
 install.py          Install.bat / Uninstall.bat
+transfer.py         Export / import (move to another computer or the server)
+server/             Docker/Dockge stack and its first-start script
 downloader.py       the Download tab (yt-dlp)
 scheduler.py        the posting queue, background conversion and Start-with-Windows
 media.py            auto-fix (ffmpeg)

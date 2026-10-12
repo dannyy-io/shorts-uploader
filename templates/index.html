@@ -251,6 +251,8 @@
                     display: grid; place-items: center; text-align: center; padding: 16px; }
   #restartOverlay div { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 22px 26px; max-width: 420px; }
   #restartOverlay b { display: block; font-size: 17px; margin-bottom: 6px; }
+  .ps-steps { padding-left: 20px; margin: 12px 0; font-size: 14px; } .ps-steps li { margin-bottom: 8px; }
+  #pasteSignin input { width: 100%; }
   .whats-new { white-space: pre-wrap; font-size: 13px; color: var(--muted); margin-top: 8px; max-height: 180px; overflow: auto; }
 
   /* bulk */
@@ -428,6 +430,13 @@
       </select>
       <span class="kbd">Only needed if a site says to log in (Instagram often does).</span>
     </div>
+    <div class="dl-opts" id="cookieOpts" hidden>
+      <span>Site logins:</span>
+      <button class="small-btn" type="button" id="cookieUpload">Upload cookies.txt</button>
+      <button class="small-btn" type="button" id="cookieRemove" hidden>Remove</button>
+      <input type="file" id="cookieFile" accept=".txt,text/plain" hidden>
+      <span class="kbd" id="cookieNote">Only needed if a site says to log in (Instagram often does). See README.</span>
+    </div>
     <div id="dlProgress"></div>
     <div class="tool-line" id="toolLine" style="margin-top:16px"></div>
   </section>
@@ -517,8 +526,36 @@
       <div class="row">
         <button class="ghost" id="checkUpdates">Check for updates</button>
         <button class="ghost" id="quitApp">Quit app</button>
+        <button class="ghost" id="logout" hidden>Log out</button>
       </div>
     </div>
+
+    <div class="set" id="transferSet">
+      <h3>Move to another computer or the home server</h3>
+      <p>Saves your connected accounts, presets, post times, history and queue into one file that you can import somewhere else. Downloaded videos aren't included. <b>Keep the file private</b>: it can post to your accounts.</p>
+      <div class="app-line">
+        <label style="display:inline-flex;gap:8px;align-items:center"><input type="checkbox" id="exQueue" checked> Include the queue</label>
+        <label style="display:inline-flex;gap:8px;align-items:center"><input type="checkbox" id="exMove"> Move the queue (remove it here so it doesn't post twice)</label>
+      </div>
+      <div class="row">
+        <button class="ghost" id="exportBtn">Export…</button>
+        <button class="ghost" id="importBtn">Import a backup…</button>
+        <input type="file" id="importFile" accept=".zip,application/zip" hidden>
+      </div>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="pasteSignin">
+  <div class="dlg-head"><h2 id="psTitle">Connect</h2><button class="icon-btn" id="psClose">Close</button></div>
+  <div class="dlg-body">
+    <ol class="ps-steps">
+      <li>Sign in on the page that just opened <span class="kbd">(<a href="#" id="psReopen">open it again</a>)</span>.</li>
+      <li>Afterwards you'll land on a page that <b>won't load</b> (its address starts with <code class="uri">http://127.0.0.1:5005/callback</code>). That's expected.</li>
+      <li>Copy that page's <b>whole address</b> from the address bar and paste it here:</li>
+    </ol>
+    <input type="text" id="psUrl" placeholder="http://127.0.0.1:5005/callback/…" autocomplete="off" spellcheck="false">
+    <div class="row" style="margin-top:12px"><button class="primary" id="psFinish">Finish connecting</button><span class="kbd" id="psMsg"></span></div>
   </div>
 </dialog>
 
@@ -542,6 +579,7 @@
 <div id="toast"></div>
 
 <script>
+const SERVER_MODE = {{ 'true' if server else 'false' }};
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
 const NAMES = { youtube: "YouTube", instagram: "Instagram", tiktok: "TikTok" };
@@ -561,6 +599,7 @@ function toast(msg, err = false) {
 async function api(path, opts = {}) {
   const headers = { "X-Shorts-Uploader": "1", ...(opts.headers || {}) };
   const r = await fetch(path, { ...opts, headers });
+  if (r.status === 401 && SERVER_MODE) { location.href = "/login"; throw new Error("Please log in again."); }
   const body = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(body.error || `Request failed (${r.status})`);
   return body;
@@ -619,7 +658,11 @@ document.addEventListener("click", async (e) => {
   const t = e.target.closest("button"); if (!t) return;
   if (t.matches("[data-open-settings]")) $("#settings").showModal();
   if (t.matches("[data-save]")) saveSettings();
-  if (t.dataset.connect) { await saveSettings(); location.href = "/connect/" + t.dataset.connect; }
+  if (t.dataset.connect) {
+    await saveSettings();
+    if (!SERVER_MODE) { location.href = "/connect/" + t.dataset.connect; return; }
+    startPasteSignin(t.dataset.connect);
+  }
   if (t.dataset.disconnect) {
     if (!confirm(`Disconnect ${NAMES[t.dataset.disconnect]}?`)) return;
     try { applyStatus(await api("/api/disconnect/" + t.dataset.disconnect, { method: "POST" })); } catch (err) { toast(err.message, true); }
@@ -1025,6 +1068,9 @@ let dlPolling = null, toolPolling = null, tools = null;
 
 async function loadTools() {
   try { tools = await api("/api/downloader/status"); } catch { return; }
+  $("#cookieRemove").hidden = !tools.cookies_file;
+  $("#cookieNote").textContent = tools.cookies_file ? "cookies.txt saved: downloads use those logins."
+    : "Only needed if a site says to log in (Instagram often does). See README.";
   const ins = tools.install, line = $("#toolLine");
   if (ins.running) {
     line.innerHTML = `<span>Installing the downloader… this takes a minute.</span>`;
@@ -1408,6 +1454,95 @@ $("#quitApp").onclick = async () => {
   setTimeout(() => window.close(), 800);
 };
 setInterval(() => { if (!document.hidden || offlineSince) loadApp(); }, 4000);
+
+/* ---------- server mode ---------- */
+let psUrl = null;
+async function startPasteSignin(platform) {
+  try {
+    const { url } = await api("/api/oauth/start/" + platform, { method: "POST" });
+    psUrl = url;
+    $("#psTitle").textContent = "Connect " + NAMES[platform];
+    $("#psUrl").value = ""; $("#psMsg").textContent = "";
+    $("#settings").close(); $("#pasteSignin").showModal();
+    window.open(url, "_blank", "noopener");
+  } catch (e) { toast(e.message, true); }
+}
+$("#psReopen").onclick = (e) => { e.preventDefault(); if (psUrl) window.open(psUrl, "_blank", "noopener"); };
+$("#psClose").onclick = () => $("#pasteSignin").close();
+$("#psFinish").onclick = async () => {
+  const url = $("#psUrl").value.trim();
+  if (!url) return $("#psUrl").focus();
+  $("#psFinish").disabled = true; $("#psMsg").textContent = "Connecting…";
+  try {
+    const r = await api("/api/oauth/finish", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url }) });
+    $("#pasteSignin").close(); toast(`${r.name} connected`);
+    applyStatus(await api("/api/status"));
+  } catch (e) { $("#psMsg").textContent = e.message; }
+  $("#psFinish").disabled = false;
+};
+$("#psUrl").addEventListener("keydown", (e) => { if (e.key === "Enter") $("#psFinish").click(); });
+
+if (SERVER_MODE) {
+  document.querySelector(".dl-opts").hidden = true;
+  $("#cookieOpts").hidden = false;
+  $("#openFolder").hidden = true;
+  $("#quitApp").hidden = true;
+  $("#logout").hidden = false;
+  $("#appNote").textContent = "Running on your home server. Updates install by themselves when nothing is uploading. Your accounts, queue and downloads are kept.";
+}
+$("#logout").onclick = async () => { await api("/api/logout", { method: "POST" }).catch(() => {}); location.href = "/login"; };
+
+$("#cookieUpload").onclick = () => $("#cookieFile").click();
+$("#cookieFile").onchange = async () => {
+  const f = $("#cookieFile").files[0]; if (!f) return;
+  const fd = new FormData(); fd.append("cookies", f);
+  try { tools = await api("/api/downloader/cookies", { method: "POST", body: fd }); toast("Cookies saved"); loadTools(); }
+  catch (e) { toast(e.message, true); }
+  $("#cookieFile").value = "";
+};
+$("#cookieRemove").onclick = async () => {
+  try { await api("/api/downloader/cookies/delete", { method: "POST" }); toast("Cookies removed"); loadTools(); }
+  catch (e) { toast(e.message, true); }
+};
+
+/* ---------- export / import ---------- */
+$("#exQueue").onchange = () => { $("#exMove").disabled = !$("#exQueue").checked; if (!$("#exQueue").checked) $("#exMove").checked = false; };
+$("#exportBtn").onclick = async () => {
+  const move = $("#exMove").checked && $("#exQueue").checked;
+  if (move && !confirm("Move the queue? Scheduled posts will be removed from this copy of the app after the file is saved, so only the place you import it into posts them.")) return;
+  const btn = $("#exportBtn"); btn.disabled = true; btn.textContent = "Exporting…";
+  try {
+    const r = await fetch("/api/transfer/export", { method: "POST",
+      headers: { "X-Shorts-Uploader": "1", "Content-Type": "application/json" },
+      body: JSON.stringify({ queue: $("#exQueue").checked, move }) });
+    if (r.status === 401) { location.href = "/login"; return; }
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `Export failed (${r.status})`);
+    const blob = await r.blob(), count = +(r.headers.get("X-Queue-Count") || 0);
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = (r.headers.get("Content-Disposition") || "").match(/filename="?([^";]+)/)?.[1] || "shorts-uploader-backup.zip";
+    document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    toast(`Exported${$("#exQueue").checked ? ` with ${count} queued post${count === 1 ? "" : "s"}` : ""}${move && count ? " (removed from here)" : ""}`);
+    loadQueue();
+  } catch (e) { toast(e.message, true); }
+  btn.disabled = false; btn.textContent = "Export…";
+};
+$("#importBtn").onclick = () => $("#importFile").click();
+$("#importFile").onchange = async () => {
+  const f = $("#importFile").files[0]; if (!f) return;
+  const fd = new FormData(); fd.append("backup", f);
+  const btn = $("#importBtn"); btn.disabled = true; btn.textContent = "Importing…";
+  try {
+    const r = await api("/api/transfer/import", { method: "POST", body: fd });
+    const bits = [];
+    if (r.accounts.length) bits.push(`accounts: ${r.accounts.map(a => NAMES[a] || a).join(", ")}`);
+    if (r.presets) bits.push(`${r.presets} preset${r.presets === 1 ? "" : "s"}`);
+    if (r.queue) bits.push(`${r.queue} queued post${r.queue === 1 ? "" : "s"}`);
+    toast("Imported " + (bits.join(", ") || "settings"));
+    applyStatus(await api("/api/status")); loadQueue(); loadHistory();
+  } catch (e) { toast(e.message, true); }
+  btn.disabled = false; btn.textContent = "Import a backup…"; $("#importFile").value = "";
+};
 
 /* ---------- boot ---------- */
 (async () => {

@@ -1,5 +1,11 @@
 # What's new
 
+## 1.6.0
+- Runs on a home server (Docker/Dockge) so scheduled posts go out with your PC off. Password-protected; open it from any device on your network.
+- Settings → Move to another computer: export your accounts, presets, post times, history and queue to one file and import it elsewhere (optionally moving the queue so nothing posts twice).
+- Connecting YouTube/TikTok on the server: paste the address you land on after signing in.
+- Server downloads can use an uploaded cookies.txt for sites that need a login.
+
 ## 1.5.0
 - Several post times per day (e.g. 12 AM and 12 PM): set them in the Queue tab. "Next open slot" fills them in order.
 - "What's new" after an update now shows the notes for the version you got.

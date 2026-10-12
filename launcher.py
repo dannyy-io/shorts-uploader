@@ -22,12 +22,15 @@ LOG_FILE = os.path.join(DATA_DIR, "app.log")
 PORT = int(os.environ.get("SHORTS_UPLOADER_PORT", "5005"))
 URL = f"http://127.0.0.1:{PORT}"
 RESTART_CODE = 3
+SERVER = os.environ.get("SHORTS_UPLOADER_SERVER") == "1"  # in Docker: log to the container output
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 EXTRAS = ["yt-dlp[default]", "imageio-ffmpeg"]
 OPTIONAL = ["deno"]
 
 
 def log(msg):
+    if SERVER:
+        print(time.strftime("%Y-%m-%d %H:%M:%S ") + f"[launcher] {msg}", flush=True)
     try:
         if os.path.exists(LOG_FILE) and os.path.getsize(LOG_FILE) > 5 * 1024 * 1024:
             os.replace(LOG_FILE, LOG_FILE + ".old")
@@ -102,6 +105,9 @@ def try_update():
 def run_app():
     env = dict(os.environ, SHORTS_UPLOADER_NO_BROWSER="1", SHORTS_UPLOADER_LAUNCHER="1",
                PYTHONUNBUFFERED="1", PYTHONIOENCODING="utf-8")
+    if SERVER:  # Docker/Dockge shows the container output, so let the app print there
+        logf = open(os.devnull, "w")
+        return subprocess.Popen([console_python(), os.path.join(BASE_DIR, "app.py")], cwd=BASE_DIR, env=env), logf
     logf = open(LOG_FILE, "a", encoding="utf-8")
     return subprocess.Popen([console_python(), os.path.join(BASE_DIR, "app.py")], cwd=BASE_DIR, env=env,
                             stdout=logf, stderr=subprocess.STDOUT, creationflags=NO_WINDOW), logf

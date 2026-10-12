@@ -1,0 +1,30 @@
+# Shorts Uploader on a home server (Dockge / docker compose).
+# Paste this into a new Dockge stack called "shorts-uploader", change the password, and Deploy.
+# Then open http://<your-server>:5005 from any device on your network.
+services:
+  shorts-uploader:
+    image: python:3.12-slim
+    container_name: shorts-uploader
+    restart: unless-stopped
+    ports:
+      - "5005:5005"            # change the LEFT number if 5005 is taken, e.g. "5055:5005"
+    environment:
+      SHORTS_UPLOADER_SERVER: "1"
+      SHORTS_UPLOADER_PASSWORD: "change-me"   # <-- pick your own password
+      TZ: "America/Los_Angeles"               # post times use this time zone
+    volumes:
+      - ./app:/app                             # the app, your accounts, queue and downloads
+      - /usr/share/zoneinfo:/usr/share/zoneinfo:ro
+    working_dir: /app
+    # First start downloads the app from GitHub; after that it updates itself.
+    command:
+      - python
+      - -c
+      - |
+        import os, runpy, urllib.request
+        p = "/app/server/server_start.py"
+        if not os.path.exists(p):
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            url = "https://raw.githubusercontent.com/dannyy-io/shorts-uploader/main/server/server_start.py"
+            open(p, "wb").write(urllib.request.urlopen(url, timeout=60).read())
+        runpy.run_path(p, run_name="__main__")

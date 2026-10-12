@@ -307,6 +307,18 @@ def start(runner):
     threading.Thread(target=_prep_loop, daemon=True, name="prepare").start()
 
 
+def import_items(new_items):
+    """Add posts brought over from another computer (see transfer.py)."""
+    with _lock:
+        lst = items()
+        lst.extend(new_items)
+        _save(lst)
+    for it in new_items:
+        if it.get("status") == "preparing":
+            _prep_queue.put(it["id"])
+    _wake.set()
+
+
 def set_job(item_id, job_id):
     def fn(item, lst):
         item["job_id"] = job_id
