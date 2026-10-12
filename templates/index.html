@@ -1,0 +1,1405 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shorts Uploader</title>
+<link rel="icon" type="image/png" href="/static/icon.png">
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --panel-2: #1e222b; --line: #2a2f3a;
+    --text: #e8eaef; --muted: #8b93a3; --accent: #7c8cff; --accent-ink: #0f1115;
+    --ok: #3ecf8e; --err: #ff6b6b; --warn: #f5b942;
+    --yt: #ff3d3d; --ig: #e1306c; --tt: #25f4ee;
+    --radius: 14px;
+    color-scheme: dark;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f4f5f8; --panel: #ffffff; --panel-2: #f0f2f6; --line: #dfe2e9;
+      --text: #161922; --muted: #646c7c; --accent: #4a5cf0; --accent-ink: #fff; --tt: #0aa5a0;
+      color-scheme: light;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  header {
+    display: flex; align-items: center; gap: 14px; padding: 16px 24px;
+    border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--bg); z-index: 5;
+  }
+  header h1 { font-size: 17px; margin: 0; letter-spacing: .2px; }
+  .pills { display: flex; gap: 8px; margin-left: auto; flex-wrap: wrap; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 99px;
+    background: var(--panel); border: 1px solid var(--line); font-size: 13px; color: var(--muted);
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--line); }
+  .pill.on .dot { background: var(--ok); }
+  .pill.on { color: var(--text); }
+  .icon-btn {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 7px 12px; cursor: pointer;
+  }
+  .icon-btn:hover { border-color: var(--muted); }
+
+  main { max-width: 1180px; margin: 0 auto; padding: 24px; display: grid; gap: 20px;
+         grid-template-columns: minmax(280px, 380px) 1fr; }
+  @media (max-width: 860px) { main { grid-template-columns: 1fr; padding: 16px; } header { padding: 12px 16px; flex-wrap: wrap; gap: 10px; } }
+  @media (max-width: 600px) { .pills { display: none; } header .icon-btn { margin-left: auto; } }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; }
+
+  /* video */
+  #drop {
+    aspect-ratio: 9/16; max-height: 640px; width: 100%; border: 2px dashed var(--line); border-radius: 12px;
+    display: grid; place-items: center; text-align: center; cursor: pointer; position: relative; overflow: hidden;
+    background: var(--panel-2); transition: border-color .15s, background .15s;
+  }
+  #drop.over { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--panel-2)); }
+  #drop .hint { color: var(--muted); padding: 20px; }
+  #drop .hint b { color: var(--text); display: block; font-size: 16px; margin-bottom: 4px; }
+  #drop video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
+  #fileInfo { margin-top: 12px; font-size: 13px; color: var(--muted); display: none; }
+  #fileInfo .name { color: var(--text); font-weight: 600; word-break: break-all; }
+  .warn { color: var(--warn); margin-top: 6px; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+  /* form */
+  label.field { display: block; margin-bottom: 14px; }
+  label.field > span { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  .count.over { color: var(--err); }
+  input[type=text], input[type=password], textarea, select {
+    width: 100%; background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; outline: none;
+  }
+  input:focus, textarea:focus, select:focus { border-color: var(--accent); }
+  textarea { resize: vertical; min-height: 120px; }
+  select { padding: 8px 10px; width: auto; }
+
+  .platforms { display: grid; gap: 10px; margin: 6px 0 18px; }
+  .plat { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; background: var(--panel-2); }
+  .plat.off { opacity: .55; }
+  .plat-head { display: flex; align-items: center; gap: 10px; }
+  .plat-head .badge { width: 10px; height: 10px; border-radius: 3px; }
+  .plat-head strong { font-size: 15px; }
+  .plat-head .acct { color: var(--muted); font-size: 13px; }
+  .plat-head .switch { margin-left: auto; }
+  .plat-opts { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; margin-top: 10px; font-size: 14px; }
+  .plat-opts label { display: inline-flex; align-items: center; gap: 6px; }
+  .plat .note { font-size: 12.5px; color: var(--muted); margin-top: 8px; }
+  .connect-link { color: var(--accent); cursor: pointer; text-decoration: underline; background: none; border: 0; padding: 0; font-size: inherit; }
+
+  .switch { position: relative; width: 40px; height: 22px; flex: none; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .switch span { position: absolute; inset: 0; background: var(--line); border-radius: 99px; cursor: pointer; transition: .15s; }
+  .switch span::after { content: ""; position: absolute; width: 16px; height: 16px; left: 3px; top: 3px; border-radius: 50%; background: #fff; transition: .15s; }
+  .switch input:checked + span { background: var(--accent); }
+  .switch input:checked + span::after { transform: translateX(18px); }
+  .switch input:disabled + span { cursor: not-allowed; }
+
+  .primary {
+    background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 12px; padding: 12px 20px;
+    font-weight: 650; cursor: pointer; font-size: 15px;
+  }
+  .primary:disabled { opacity: .45; cursor: not-allowed; }
+  .ghost { background: transparent; border: 1px solid var(--line); border-radius: 12px; padding: 11px 16px; cursor: pointer; }
+  .ghost:hover { border-color: var(--muted); }
+  .kbd { font-size: 12px; color: var(--muted); }
+
+  /* progress */
+  #progress { margin-top: 18px; display: none; }
+  .prog { padding: 10px 0; border-top: 1px solid var(--line); }
+  .prog-top { display: flex; justify-content: space-between; gap: 10px; font-size: 14px; }
+  .prog-msg { color: var(--muted); font-size: 13px; margin-top: 4px; word-break: break-word; }
+  .prog.error .prog-msg { color: var(--err); }
+  .prog.done .prog-msg { color: var(--ok); }
+  .bar { height: 6px; background: var(--panel-2); border-radius: 99px; overflow: hidden; margin-top: 8px; }
+  .bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .3s; }
+  .prog.done .bar i { background: var(--ok); }
+  .prog.error .bar i { background: var(--err); }
+  a { color: var(--accent); }
+
+  /* history */
+  details.history { grid-column: 1 / -1; }
+  details.history summary { cursor: pointer; font-weight: 600; }
+  .hist { display: grid; gap: 8px; margin-top: 12px; }
+  .hist-item { display: flex; gap: 12px; flex-wrap: wrap; align-items: baseline; padding: 8px 0; border-top: 1px solid var(--line); font-size: 14px; }
+  .hist-item .t { font-weight: 600; }
+  .hist-item .when { color: var(--muted); font-size: 12.5px; }
+  .tag { font-size: 12.5px; padding: 2px 8px; border-radius: 99px; background: var(--panel-2); border: 1px solid var(--line); }
+  .tag.ok { border-color: color-mix(in srgb, var(--ok) 50%, var(--line)); }
+  .tag.bad { border-color: color-mix(in srgb, var(--err) 60%, var(--line)); color: var(--err); }
+
+  /* settings */
+  dialog { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); color: var(--text);
+           width: min(680px, calc(100vw - 32px)); padding: 0; max-height: calc(100vh - 40px); }
+  dialog::backdrop { background: rgba(0,0,0,.55); }
+  .dlg-head { display: flex; align-items: center; padding: 16px 20px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--panel); }
+  .dlg-head h2 { margin: 0; font-size: 17px; }
+  .dlg-head button { margin-left: auto; }
+  .dlg-body { padding: 4px 20px 20px; }
+  .set { padding: 16px 0; border-bottom: 1px solid var(--line); }
+  .set:last-child { border-bottom: 0; }
+  .set h3 { margin: 0 0 4px; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+  .set p { margin: 0 0 12px; font-size: 13px; color: var(--muted); }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  @media (max-width: 560px) { .two { grid-template-columns: 1fr; } }
+  code.uri { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; font-size: 12.5px; user-select: all; }
+  .status-line { font-size: 13px; margin-bottom: 10px; }
+  .status-line.on { color: var(--ok); }
+
+  #toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--panel); border: 1px solid var(--line);
+           padding: 10px 16px; border-radius: 10px; display: none; z-index: 50; max-width: calc(100vw - 32px); box-shadow: 0 8px 30px rgba(0,0,0,.3); }
+  #toast.err { border-color: var(--err); }
+
+  /* tabs */
+  .tabs { display: flex; gap: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 11px; padding: 3px; }
+  .tabs button { background: none; border: 0; border-radius: 8px; padding: 6px 14px; cursor: pointer; color: var(--muted); font-weight: 600; }
+  .tabs button.active { background: var(--panel-2); color: var(--text); box-shadow: inset 0 0 0 1px var(--line); }
+  [hidden] { display: none !important; }
+
+  /* download view */
+  #downloadView { grid-template-columns: minmax(0, 1fr); max-width: 860px; }
+  #downloadView .card, .dl-form input { min-width: 0; }
+  .dl-form { display: flex; gap: 10px; }
+  .dl-form input { flex: 1; font-size: 16px; padding: 12px 14px; }
+  @media (max-width: 560px) { .dl-form { flex-direction: column; } }
+  .dl-opts { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 12px; font-size: 14px; color: var(--muted); }
+  .tool-line { font-size: 13px; color: var(--muted); display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .tool-line b { color: var(--text); font-weight: 600; }
+  .tool-line .bad { color: var(--warn); }
+  .small-btn { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 5px 10px; cursor: pointer; font-size: 13px; }
+  .small-btn:hover { border-color: var(--muted); }
+  .small-btn:disabled { opacity: .5; cursor: progress; }
+  #dlProgress { margin-top: 16px; display: none; }
+  .files-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+  .files-head h2 { font-size: 15px; margin: 0; }
+  .files-head .small-btn { margin-left: auto; }
+  .file-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); }
+  .file-row .fn { flex: 1; min-width: 0; }
+  .file-row .fn div:first-child { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .file-row .fn div:last-child { font-size: 12.5px; color: var(--muted); }
+  .file-row .acts { display: flex; gap: 6px; flex: none; }
+  .empty { color: var(--muted); font-size: 14px; padding: 8px 0; }
+  .fineprint { font-size: 12.5px; color: var(--muted); margin-top: 12px; }
+
+  /* when picker */
+  .when { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; background: var(--panel-2); margin-bottom: 16px; }
+  .seg { display: inline-flex; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 3px; gap: 2px; flex-wrap: wrap; }
+  .seg label { padding: 6px 12px; border-radius: 7px; cursor: pointer; font-size: 14px; color: var(--muted); }
+  .seg input { position: absolute; opacity: 0; pointer-events: none; }
+  .seg label:has(input:checked) { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  .when-detail { margin-top: 10px; font-size: 14px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .when-detail input[type=datetime-local] { width: auto; padding: 7px 10px; }
+  .tab-count { display: inline-block; min-width: 18px; padding: 0 5px; margin-left: 4px; border-radius: 99px; background: var(--accent); color: var(--accent-ink); font-size: 11.5px; line-height: 18px; text-align: center; }
+
+  /* queue */
+  #queueView { grid-template-columns: minmax(0, 1fr); max-width: 860px; }
+  #queueView .card { min-width: 0; }
+  .q-settings { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; font-size: 14px; }
+  .q-settings label { display: inline-flex; gap: 8px; align-items: center; }
+  .q-settings input[type=time] { width: auto; padding: 6px 10px; }
+  .q-item { padding: 12px 0; border-top: 1px solid var(--line); display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; align-items: start; }
+  .q-item:first-of-type { border-top: 0; }
+  .q-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .q-when { font-size: 13px; color: var(--muted); }
+  .q-when b { color: var(--text); font-weight: 600; }
+  .q-tags { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+  .q-acts { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+  .q-msg { grid-column: 1 / -1; font-size: 13px; color: var(--err); }
+  .q-item.running .q-when b { color: var(--accent); }
+  .q-resched { grid-column: 1 / -1; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .q-resched input { width: auto; padding: 6px 10px; }
+  @media (max-width: 560px) { .q-item { grid-template-columns: 1fr; } .q-acts { justify-content: flex-start; } }
+
+  /* auto-fix + credit (left card) */
+  .fixbox { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); font-size: 14px; display: grid; gap: 8px; }
+  .fixbox > label { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; }
+  .fix-opts { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .fix-opts select { font-size: 13px; padding: 6px 8px; max-width: 100%; }
+  .fix-opts label { display: inline-flex; gap: 6px; align-items: center; }
+  .fixhint { font-size: 12.5px; color: var(--muted); }
+  .credit { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); display: grid; gap: 8px; }
+  .credit .field { margin: 0; }
+  .credit input { padding: 8px 10px; font-size: 14px; }
+
+  /* presets + per-platform captions */
+  .preset-row { margin: -4px 0 12px; font-size: 14px; gap: 8px; }
+  .preset-row select { padding: 6px 8px; max-width: 220px; }
+  .preset-row .kbd { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+  details.per-plat { margin: 0 0 14px; border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; background: var(--panel-2); }
+  details.per-plat summary { cursor: pointer; font-size: 14px; color: var(--muted); }
+  details.per-plat[open] summary { margin-bottom: 10px; }
+  details.per-plat textarea { min-height: 72px; background: var(--panel); }
+  details.per-plat .field:last-of-type { margin-bottom: 6px; }
+  .preset-edit { border: 1px solid var(--line); border-radius: 10px; padding: 10px; margin-bottom: 10px; display: grid; gap: 8px; }
+  .preset-edit .row input { flex: 1; }
+  .preset-edit textarea { min-height: 96px; }
+
+  /* app / updates */
+  .app-line { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 14px; margin-bottom: 10px; }
+  .app-line .ok { color: var(--ok); } .app-line .new { color: var(--accent); font-weight: 600; }
+  #restartOverlay { position: fixed; inset: 0; background: color-mix(in srgb, var(--bg) 88%, transparent); z-index: 60;
+                    display: grid; place-items: center; text-align: center; padding: 16px; }
+  #restartOverlay div { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 22px 26px; max-width: 420px; }
+  #restartOverlay b { display: block; font-size: 17px; margin-bottom: 6px; }
+  .whats-new { white-space: pre-wrap; font-size: 13px; color: var(--muted); margin-top: 8px; max-height: 180px; overflow: auto; }
+
+  /* bulk */
+  #bulkList { margin: 12px 0; display: grid; gap: 8px; }
+  .bulk-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 150px) auto; gap: 8px; align-items: center;
+              border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; background: var(--panel-2); }
+  .bulk-row input { padding: 7px 9px; font-size: 14px; background: var(--panel); }
+  .bulk-row .src { grid-column: 1 / -1; font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bulk-row .st { grid-column: 1 / -1; font-size: 12.5px; }
+  .bulk-row.done .st { color: var(--ok); } .bulk-row.error .st { color: var(--err); }
+  @media (max-width: 560px) { .bulk-row { grid-template-columns: 1fr auto; } .bulk-row .cr { grid-column: 1 / -1; grid-row: 3; } }
+  .dl-pick { display: grid; gap: 4px; margin-top: 8px; max-height: 220px; overflow: auto; }
+  .dl-pick label { display: flex; gap: 8px; align-items: center; font-size: 14px; padding: 4px 0; }
+  .dl-pick label span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .file-row .fn .cr { color: var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Shorts Uploader</h1>
+  <nav class="tabs" role="tablist">
+    <button data-tab="upload" class="active" role="tab">Upload</button>
+    <button data-tab="download" role="tab">Download</button>
+    <button data-tab="queue" role="tab">Queue<span class="tab-count" id="qCount" hidden></span></button>
+  </nav>
+  <div class="pills" id="pills"></div>
+  <button class="icon-btn" id="openSettings" title="Settings">⚙ Settings</button>
+</header>
+
+<main id="uploadView">
+  <section class="card">
+    <div id="drop" tabindex="0">
+      <div class="hint"><b>Drop a video here</b>or click to choose<br><small>MP4, MOV or WebM · vertical 9:16</small></div>
+    </div>
+    <input type="file" id="file" accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.m4v,.webm" hidden>
+    <div id="fileInfo">
+      <div class="name" id="fName"></div>
+      <div id="fMeta"></div>
+      <div id="fWarn"></div>
+      <div class="row" style="margin-top:10px"><button class="ghost" id="replace">Choose another</button></div>
+      <div class="fixbox">
+        <label><span class="switch"><input type="checkbox" id="fix" checked><span></span></span> Auto-fix format</label>
+        <div class="fix-opts" id="fixOpts">
+          <select id="fit" aria-label="Horizontal clips">
+            <option value="blur">Horizontal clips: blurred background</option>
+            <option value="crop">Horizontal clips: crop to fill</option>
+          </select>
+          <label><input type="checkbox" id="trim"> Trim to 3:00</label>
+        </div>
+        <div class="fixhint" id="fixHint"></div>
+      </div>
+      <div class="credit" id="creditBox" hidden>
+        <label class="field"><span>Original creator</span><input type="text" id="creator" placeholder="@handle" autocomplete="off"></label>
+        <label class="field"><span>Source link</span><input type="text" id="link" placeholder="https://…" autocomplete="off"></label>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <label class="field">
+      <span>Title <em class="count" id="titleCount">0 / 100</em></span>
+      <input type="text" id="title" placeholder="What's this Short about?" autocomplete="off">
+    </label>
+    <label class="field">
+      <span>Description <em class="count" id="descCount"></em></span>
+      <textarea id="desc" placeholder="Description, hashtags, credits…"></textarea>
+    </label>
+    <div class="row preset-row">
+      <label for="preset">Add preset</label>
+      <select id="preset"><option value="">None</option></select>
+      <button class="connect-link" type="button" data-edit-presets>edit presets</button>
+      <span class="kbd" id="presetPreview"></span>
+    </div>
+    <details class="per-plat" id="perPlat">
+      <summary>Different caption per platform</summary>
+      <label class="field"><span>YouTube description <em class="count" data-cnt="youtube"></em></span>
+        <textarea id="desc_youtube" placeholder="Empty = use the main description"></textarea></label>
+      <label class="field"><span>Instagram caption <em class="count" data-cnt="instagram"></em></span>
+        <textarea id="desc_instagram" placeholder="Empty = title + description. Filled = replaces both."></textarea></label>
+      <label class="field"><span>TikTok caption <em class="count" data-cnt="tiktok"></em></span>
+        <textarea id="desc_tiktok" placeholder="Empty = title + description. Filled = replaces both."></textarea></label>
+      <div class="kbd">The preset is still added to the end of each.</div>
+    </details>
+
+    <div class="platforms">
+      <div class="plat" data-p="youtube">
+        <div class="plat-head">
+          <i class="badge" style="background:var(--yt)"></i><strong>YouTube Shorts</strong><span class="acct"></span>
+          <label class="switch"><input type="checkbox" data-toggle="youtube"><span></span></label>
+        </div>
+        <div class="plat-opts">
+          <select id="yt_privacy"><option value="public">Public</option><option value="unlisted">Unlisted</option><option value="private">Private</option></select>
+          <label><input type="checkbox" id="yt_shorts_tag" checked> Add #Shorts</label>
+          <label><input type="checkbox" id="yt_notify" checked> Notify subscribers</label>
+          <label><input type="checkbox" id="yt_kids"> Made for kids</label>
+        </div>
+      </div>
+
+      <div class="plat" data-p="instagram">
+        <div class="plat-head">
+          <i class="badge" style="background:var(--ig)"></i><strong>Instagram Reels</strong><span class="acct"></span>
+          <label class="switch"><input type="checkbox" data-toggle="instagram"><span></span></label>
+        </div>
+        <div class="plat-opts">
+          <label><input type="checkbox" id="ig_feed" checked> Also show in profile grid</label>
+          <button class="small-btn" type="button" id="setCover" title="Pause the preview on the frame you want, then click">Use current frame as cover</button>
+          <span class="kbd" id="coverLabel"></span>
+        </div>
+        <div class="note">Caption = title + description.</div>
+      </div>
+
+      <div class="plat" data-p="tiktok">
+        <div class="plat-head">
+          <i class="badge" style="background:var(--tt)"></i><strong>TikTok</strong><span class="acct"></span>
+          <label class="switch"><input type="checkbox" data-toggle="tiktok"><span></span></label>
+        </div>
+        <div class="plat-opts">
+          <select id="tt_mode">
+            <option value="draft">Send to TikTok drafts</option>
+            <option value="direct">Post directly</option>
+          </select>
+          <select id="tt_privacy" style="display:none"><option value="SELF_ONLY">Only me</option></select>
+          <label id="tt_comments_wrap" style="display:none"><input type="checkbox" id="tt_no_comments"> Turn off comments</label>
+        </div>
+        <div class="note" id="tt_note"></div>
+      </div>
+    </div>
+
+    <div class="when">
+      <div class="seg" role="radiogroup" aria-label="When to post">
+        <label><input type="radio" name="when" value="now" checked>Post now</label>
+        <label><input type="radio" name="when" value="at">Pick a time</label>
+        <label><input type="radio" name="when" value="daily">Next daily slot</label>
+      </div>
+      <div class="when-detail" id="whenAt" hidden>
+        <input type="datetime-local" id="whenTime">
+      </div>
+      <div class="when-detail" id="whenDaily" hidden>
+        <span>Goes out <b id="nextSlot">…</b></span>
+        <button class="connect-link" type="button" data-goto-queue>change daily time</button>
+      </div>
+    </div>
+
+    <div class="row">
+      <button class="primary" id="go" disabled>Upload</button>
+      <button class="ghost" id="clear">Clear</button>
+      <button class="ghost" id="openBulk">Bulk add…</button>
+      <span class="kbd">Ctrl + Enter to upload</span>
+    </div>
+
+    <div id="progress"></div>
+  </section>
+
+  <details class="history card" id="historyBox">
+    <summary>Recent uploads</summary>
+    <div class="hist" id="hist"></div>
+  </details>
+</main>
+
+<main id="downloadView" hidden>
+  <section class="card">
+    <div class="dl-form">
+      <input type="text" id="dlUrl" placeholder="Paste a YouTube, Instagram or TikTok link" autocomplete="off" spellcheck="false">
+      <button class="primary" id="dlGo">Download</button>
+    </div>
+    <div class="dl-opts">
+      <label for="dlBrowser">Use my browser login:</label>
+      <select id="dlBrowser">
+        <option value="">Off</option>
+        <option value="firefox">Firefox</option>
+        <option value="edge">Edge</option>
+        <option value="chrome">Chrome</option>
+        <option value="brave">Brave</option>
+        <option value="opera">Opera</option>
+      </select>
+      <span class="kbd">Only needed if a site says to log in (Instagram often does).</span>
+    </div>
+    <div id="dlProgress"></div>
+    <div class="tool-line" id="toolLine" style="margin-top:16px"></div>
+  </section>
+
+  <section class="card">
+    <div class="files-head">
+      <h2>Downloaded videos</h2>
+      <button class="small-btn" id="openFolder">Open folder</button>
+    </div>
+    <div id="dlFiles"><div class="empty">Nothing yet.</div></div>
+    <p class="fineprint">Re-uploading someone else's video can get your accounts copyright strikes. Use this for your own videos and clips you have the rights to edit.</p>
+  </section>
+</main>
+
+<main id="queueView" hidden>
+  <section class="card">
+    <div class="q-settings">
+      <label>Daily post time <input type="time" id="dailyTime" value="18:00"></label>
+      <label id="autostartWrap"><span class="switch"><input type="checkbox" id="autostart"><span></span></span> Start this app when Windows starts</label>
+    </div>
+    <p class="fineprint">Scheduled posts go out while this app is running and your PC is awake. If the PC was off or asleep at post time, the post goes out as soon as the app is running again.</p>
+  </section>
+
+  <section class="card">
+    <div class="files-head"><h2>Scheduled</h2></div>
+    <div id="qList"><div class="empty">Nothing scheduled. On the Upload tab, pick “Pick a time” or “Next daily slot”.</div></div>
+  </section>
+</main>
+
+<dialog id="settings">
+  <div class="dlg-head"><h2>Settings</h2><button class="icon-btn" id="closeSettings">Close</button></div>
+  <div class="dlg-body">
+    <div class="set">
+      <h3><i class="badge" style="width:10px;height:10px;border-radius:3px;background:var(--yt)"></i> YouTube</h3>
+      <p>Google Cloud OAuth client, type <b>Desktop app</b>. See README step 1.</p>
+      <div class="status-line" id="s_youtube"></div>
+      <div class="two">
+        <label class="field"><span>Client ID</span><input type="text" id="yt_cid" autocomplete="off"></label>
+        <label class="field"><span>Client secret</span><input type="password" id="yt_secret" autocomplete="off"></label>
+      </div>
+      <div class="row"><button class="ghost" data-save>Save</button><button class="primary" data-connect="youtube">Connect YouTube</button><button class="ghost" data-disconnect="youtube">Disconnect</button></div>
+    </div>
+
+    <div class="set">
+      <h3><i style="width:10px;height:10px;border-radius:3px;background:var(--ig);display:inline-block"></i> Instagram</h3>
+      <p>Professional (Business/Creator) account. Generate a token in your Meta app under <b>Instagram → API setup with Instagram login</b>. README step 2.</p>
+      <div class="status-line" id="s_instagram"></div>
+      <label class="field"><span>Access token</span><input type="password" id="ig_token" placeholder="Paste a new token to connect or replace" autocomplete="off"></label>
+      <details style="margin-bottom:12px; font-size:13px"><summary style="cursor:pointer;color:var(--muted)">Advanced</summary>
+        <div class="two" style="margin-top:10px">
+          <label class="field"><span>API</span>
+            <select id="ig_host" style="width:100%"><option value="graph.instagram.com">Instagram Login (default)</option><option value="graph.facebook.com">Facebook Login (Page-linked)</option></select></label>
+          <label class="field"><span>Instagram user ID (Facebook Login only)</span><input type="text" id="ig_uid" autocomplete="off"></label>
+        </div>
+      </details>
+      <div class="row"><button class="primary" data-save>Save &amp; connect</button><button class="ghost" data-disconnect="instagram">Disconnect</button></div>
+    </div>
+
+    <div class="set">
+      <h3><i style="width:10px;height:10px;border-radius:3px;background:var(--tt);display:inline-block"></i> TikTok</h3>
+      <p>TikTok developer app with Login Kit (Desktop) + Content Posting API. Redirect URI to register: <code class="uri">{{ redirect_uris.tiktok }}</code></p>
+      <div class="status-line" id="s_tiktok"></div>
+      <div class="two">
+        <label class="field"><span>Client key</span><input type="text" id="tt_key" autocomplete="off"></label>
+        <label class="field"><span>Client secret</span><input type="password" id="tt_secret" autocomplete="off"></label>
+      </div>
+      <div class="row"><button class="ghost" data-save>Save</button><button class="primary" data-connect="tiktok">Connect TikTok</button><button class="ghost" data-disconnect="tiktok">Disconnect</button></div>
+    </div>
+
+    <div class="set" id="presetsSet">
+      <h3>Caption presets</h3>
+      <p>Text added to the end of a caption: hashtags, credit lines, links. You can use <code class="uri">{creator}</code>, <code class="uri">{link}</code> and <code class="uri">{title}</code>. A line is left out when its placeholder is empty.</p>
+      <div id="presetList"></div>
+      <div class="row"><button class="ghost" id="addPreset">+ Add preset</button><button class="primary" data-save>Save presets</button></div>
+    </div>
+
+    <div class="set" id="appSet">
+      <h3>App</h3>
+      <div class="app-line"><span>Version <b id="appVersion">…</b></span><span id="appStatus"></span></div>
+      <div class="app-line">
+        <label style="display:inline-flex;gap:8px;align-items:center"><span class="switch"><input type="checkbox" id="autoUpdate"><span></span></span> Update automatically</label>
+      </div>
+      <p id="appNote">Updates install by themselves when nothing is uploading, and the app restarts in a few seconds. Your accounts, queue and downloads are kept.</p>
+      <div class="row">
+        <button class="ghost" id="checkUpdates">Check for updates</button>
+        <button class="ghost" id="quitApp">Quit app</button>
+      </div>
+    </div>
+  </div>
+</dialog>
+
+<div id="restartOverlay" hidden><div><b id="roTitle">Updating…</b><span id="roText">Shorts Uploader is restarting. This page will come back in a few seconds.</span></div></div>
+
+<dialog id="bulk">
+  <div class="dlg-head"><h2>Bulk add to queue</h2><button class="icon-btn" id="closeBulk">Close</button></div>
+  <div class="dlg-body">
+    <p class="fineprint">Each video gets the next free daily slot, starting <b id="bulkStart">…</b>. They use the platforms, description, preset, per-platform captions and auto-fix settings on the Upload tab. Edit titles and credits below.</p>
+    <div class="row">
+      <button class="ghost" id="bulkPick">Add files from PC…</button>
+      <input type="file" id="bulkFiles" multiple hidden accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.m4v,.webm">
+      <span class="kbd">or drop files on this window</span>
+    </div>
+    <details style="margin-top:10px"><summary style="cursor:pointer">Add from Downloads</summary><div class="dl-pick" id="bulkDl"></div></details>
+    <div id="bulkList"></div>
+    <div class="row"><button class="primary" id="bulkGo" disabled>Add to queue</button><span class="kbd" id="bulkNote"></span></div>
+  </div>
+</dialog>
+
+<div id="toast"></div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => [...document.querySelectorAll(s)];
+const NAMES = { youtube: "YouTube", instagram: "Instagram", tiktok: "TikTok" };
+let state = { platforms: {}, settings: {} };
+let file = null, meta = null, ttInfo = null, polling = null;
+
+const store = {
+  get(k, d) { try { const v = localStorage.getItem("su:" + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem("su:" + k, JSON.stringify(v)); } catch {} },
+};
+
+function toast(msg, err = false) {
+  const t = $("#toast"); t.textContent = msg; t.className = err ? "err" : ""; t.style.display = "block";
+  clearTimeout(t._h); t._h = setTimeout(() => (t.style.display = "none"), err ? 7000 : 3500);
+}
+
+async function api(path, opts = {}) {
+  const headers = { "X-Shorts-Uploader": "1", ...(opts.headers || {}) };
+  const r = await fetch(path, { ...opts, headers });
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(body.error || `Request failed (${r.status})`);
+  return body;
+}
+
+/* ---------- status & settings ---------- */
+function applyStatus(s) {
+  state = s;
+  const pills = $("#pills"); pills.innerHTML = "";
+  for (const [k, p] of Object.entries(s.platforms)) {
+    const el = document.createElement("span");
+    el.className = "pill" + (p.connected ? " on" : "");
+    el.innerHTML = `<i class="dot"></i>${NAMES[k]}`;
+    el.title = p.connected ? `Connected${p.account ? " as " + p.account : ""}` : "Not connected";
+    pills.append(el);
+
+    const sl = $("#s_" + k);
+    sl.className = "status-line" + (p.connected ? " on" : "");
+    sl.textContent = p.connected ? `Connected${p.account ? " as " + p.account : ""}` :
+      (p.configured ? "Not connected yet." : "Add credentials, then connect.");
+
+    const card = document.querySelector(`.plat[data-p="${k}"]`);
+    const tog = card.querySelector("[data-toggle]");
+    tog.disabled = !p.connected;
+    if (!p.connected) tog.checked = false;
+    card.querySelector(".acct").innerHTML = p.connected ? (p.account ? "· " + escapeHtml(p.account) : "") :
+      `· <button class="connect-link" data-open-settings>connect</button>`;
+  }
+  const st = s.settings;
+  $("#yt_cid").value = st.youtube_client_id; $("#yt_secret").placeholder = st.youtube_has_secret ? "•••••• saved" : "";
+  $("#tt_key").value = st.tiktok_client_key; $("#tt_secret").placeholder = st.tiktok_has_secret ? "•••••• saved" : "";
+  $("#ig_host").value = st.instagram_api_host;
+  renderPresetSelect(); renderPresetEditor();
+  $("#fix").disabled = !st.ffmpeg;
+  if (!st.ffmpeg) $("#fix").checked = false;
+  restoreToggles(); refreshUI(); loadTikTokInfo();
+}
+
+function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+
+async function saveSettings() {
+  const body = {
+    youtube_client_id: $("#yt_cid").value, youtube_client_secret: $("#yt_secret").value,
+    tiktok_client_key: $("#tt_key").value, tiktok_client_secret: $("#tt_secret").value,
+    instagram_api_host: $("#ig_host").value, presets: readPresetEditor(),
+  };
+  if ($("#ig_token").value.trim()) { body.instagram_token = $("#ig_token").value; body.instagram_user_id = $("#ig_uid").value; }
+  try {
+    applyStatus(await api("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }));
+    $("#yt_secret").value = ""; $("#tt_secret").value = ""; $("#ig_token").value = "";
+    toast("Saved");
+  } catch (e) { toast(e.message, true); }
+}
+
+document.addEventListener("click", async (e) => {
+  const t = e.target.closest("button"); if (!t) return;
+  if (t.matches("[data-open-settings]")) $("#settings").showModal();
+  if (t.matches("[data-save]")) saveSettings();
+  if (t.dataset.connect) { await saveSettings(); location.href = "/connect/" + t.dataset.connect; }
+  if (t.dataset.disconnect) {
+    if (!confirm(`Disconnect ${NAMES[t.dataset.disconnect]}?`)) return;
+    try { applyStatus(await api("/api/disconnect/" + t.dataset.disconnect, { method: "POST" })); } catch (err) { toast(err.message, true); }
+  }
+});
+$("#openSettings").onclick = () => $("#settings").showModal();
+$("#closeSettings").onclick = () => $("#settings").close();
+
+/* ---------- file ---------- */
+const drop = $("#drop"), input = $("#file");
+drop.onclick = () => input.click();
+drop.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") input.click(); };
+$("#replace").onclick = () => input.click();
+input.onchange = () => input.files[0] && setFile(input.files[0]);
+["dragenter", "dragover"].forEach(ev => document.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add("over"); }));
+["dragleave", "drop"].forEach(ev => document.addEventListener(ev, (e) => { e.preventDefault(); if (ev === "drop" || e.target === drop) drop.classList.remove("over"); }));
+document.addEventListener("drop", (e) => {
+  const files = [...e.dataTransfer.files];
+  if ($("#bulk").open) { files.forEach(addBulkFile); return; }
+  if (files[0]) { showTab("upload"); setFile(files[0]); }
+});
+
+function setFile(f) {
+  if (!/\.(mp4|mov|m4v|webm)$/i.test(f.name)) return toast("Use an MP4, MOV or WebM file.", true);
+  file = f; meta = null; coverMs = null; $("#creator").value = ""; $("#link").value = "";
+  const url = URL.createObjectURL(f);
+  drop.innerHTML = ""; const v = document.createElement("video");
+  v.src = url; v.controls = true; v.muted = true; v.playsInline = true; v.preload = "metadata";
+  v.onclick = (e) => e.stopPropagation();
+  v.onloadedmetadata = () => { meta = { d: v.duration, w: v.videoWidth, h: v.videoHeight }; showInfo(); };
+  v.onerror = () => { meta = { noPreview: true }; showInfo(); };
+  drop.append(v);
+  if (!$("#title").value.trim()) $("#title").value = f.name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim().slice(0, 100);
+  showInfo(); refreshUI();
+}
+
+function resetFile() {
+  file = null; meta = null; input.value = ""; coverMs = null;
+  $("#creator").value = ""; $("#link").value = ""; $("#trim").checked = false;
+  ["youtube", "instagram", "tiktok"].forEach(p => $("#desc_" + p).value = "");
+  drop.innerHTML = `<div class="hint"><b>Drop a video here</b>or click to choose<br><small>MP4, MOV or WebM · vertical 9:16</small></div>`;
+  $("#fileInfo").style.display = "none"; refreshUI();
+}
+
+function setServerFile(item) {
+  file = { name: item.name, size: item.size, serverName: item.name }; meta = null; coverMs = null;
+  $("#creator").value = item.creator || ""; $("#link").value = item.link || "";
+  drop.innerHTML = ""; const v = document.createElement("video");
+  v.src = "/files/" + encodeURIComponent(item.name); v.controls = true; v.muted = true; v.playsInline = true; v.preload = "metadata";
+  v.onclick = (e) => e.stopPropagation();
+  v.onloadedmetadata = () => { meta = { d: v.duration, w: v.videoWidth, h: v.videoHeight }; showInfo(); };
+  v.onerror = () => { meta = { noPreview: true }; showInfo(); };
+  drop.append(v);
+  if (!$("#title").value.trim()) $("#title").value = titleFromName(item.name);
+  showInfo(); refreshUI();
+}
+
+function titleFromName(name) {
+  return name.replace(/\s*\[[^\]]+\]\.[^.]+$/, "").replace(/\.[^.]+$/, "")
+    .replace(/[：⧸？＂＊｜＜＞⧹]/g, c => ({ "：": ":", "⧸": "/", "？": "?", "＂": '"', "＊": "*", "｜": "|", "＜": "", "＞": "", "⧹": "\\" }[c]))
+    .replace(/[_]+/g, " ").trim().slice(0, 100);
+}
+
+function fmtSize(b) { return b > 1e9 ? (b / 1e9).toFixed(2) + " GB" : b > 1e6 ? (b / 1e6).toFixed(1) + " MB" : Math.max(1, Math.round(b / 1e3)) + " KB"; }
+function fmtDur(s) { const m = Math.floor(s / 60), r = Math.round(s % 60); return `${m}:${String(r).padStart(2, "0")}`; }
+
+function showInfo() {
+  $("#fileInfo").style.display = "block";
+  $("#fName").textContent = file.name;
+  const bits = [fmtSize(file.size)];
+  if (meta && !meta.noPreview) bits.push(fmtDur(meta.d), `${meta.w}×${meta.h}`);
+  if (meta && meta.noPreview) bits.push("no preview in this browser (upload still works)");
+  $("#fMeta").textContent = bits.join(" · ");
+  const warns = [];
+  if (meta && !meta.noPreview) {
+    if (meta.w && meta.h && meta.w > meta.h) warns.push("This is horizontal. It'll upload as a regular video on YouTube, not a Short.");
+    if (meta.d > 180) warns.push("Over 3 minutes: YouTube won't treat it as a Short.");
+    if (meta.d > 900) warns.push("Over 15 minutes: Instagram Reels won't accept it.");
+    if (ttInfo && ttInfo.max_video_post_duration_sec && meta.d > ttInfo.max_video_post_duration_sec)
+      warns.push(`Longer than your TikTok limit (${fmtDur(ttInfo.max_video_post_duration_sec)}).`);
+  }
+  $("#fWarn").innerHTML = warns.map(w => `<div class="warn">⚠ ${escapeHtml(w)}</div>`).join("");
+  updateFixHint(); updateCover();
+}
+
+function updateFixHint() {
+  const on = $("#fix").checked;
+  $("#fixOpts").style.display = on ? "" : "none";
+  let hint;
+  if (!state.settings.ffmpeg) hint = "Needs ffmpeg — close the app and run start.bat again to install it.";
+  else if (!on) hint = "Uploads the file exactly as it is.";
+  else if (!file) hint = "";
+  else {
+    const bits = [];
+    if (meta && !meta.noPreview && meta.w && meta.h) {
+      if (Math.abs(meta.w / meta.h - 9 / 16) > 0.01) bits.push(meta.w > meta.h ? `make it vertical (${$("#fit").value === "crop" ? "crop" : "blurred background"})` : "reframe to 9:16");
+      else if (meta.h > 1920) bits.push("scale to 1080×1920");
+      if ($("#trim").checked && meta.d > 180) bits.push("trim to 3:00");
+    }
+    if (!/\.(mp4|m4v)$/i.test(file.name)) bits.push("save as MP4");
+    hint = bits.length ? "Will " + bits.join(", ") + ", and fix the codec if needed." : "Checks the codec before uploading and converts only if needed.";
+  }
+  $("#fixHint").textContent = hint;
+}
+$("#fix").addEventListener("change", updateFixHint);
+$("#fit").addEventListener("change", updateFixHint);
+$("#trim").addEventListener("change", updateFixHint);
+
+/* ---------- Instagram cover ---------- */
+let coverMs = null;
+function updateCover() {
+  const v = drop.querySelector("video"), ok = v && meta && !meta.noPreview;
+  $("#setCover").disabled = !ok;
+  $("#setCover").title = ok ? "Pause the preview on the frame you want, then click" : "Needs a playable preview";
+  $("#coverLabel").innerHTML = coverMs === null ? "" :
+    `Cover at ${fmtDur(coverMs / 1000)}.${String(Math.floor(coverMs % 1000 / 100))} <button class="connect-link" type="button" id="clearCover">reset</button>`;
+  const c = $("#clearCover"); if (c) c.onclick = () => { coverMs = null; updateCover(); };
+}
+$("#setCover").onclick = () => {
+  const v = drop.querySelector("video"); if (!v) return;
+  coverMs = Math.round(v.currentTime * 1000); updateCover(); toast("Cover frame set");
+};
+
+/* ---------- form ---------- */
+const FIELDS = ["yt_privacy", "yt_shorts_tag", "yt_notify", "yt_kids", "ig_feed", "tt_mode", "tt_no_comments", "fix", "fit", "preset"];
+function restoreToggles() {
+  const saved = store.get("toggles", {});
+  $$("[data-toggle]").forEach(t => { if (!t.disabled) t.checked = saved[t.dataset.toggle] ?? true; });
+}
+function saveForm() {
+  const toggles = {}; $$("[data-toggle]").forEach(t => { if (!t.disabled) toggles[t.dataset.toggle] = t.checked; });
+  store.set("toggles", toggles);
+  const opts = {}; FIELDS.forEach(id => { const el = $("#" + id); opts[id] = el.type === "checkbox" ? el.checked : el.value; });
+  opts.tt_privacy = $("#tt_privacy").value;
+  store.set("opts", opts);
+  store.set("draft", { title: $("#title").value, desc: $("#desc").value,
+    pp: Object.fromEntries(["youtube", "instagram", "tiktok"].map(p => [p, $("#desc_" + p).value])) });
+}
+function restoreForm() {
+  const opts = store.get("opts", {});
+  FIELDS.forEach(id => { const el = $("#" + id); if (opts[id] === undefined) return; if (el.type === "checkbox") el.checked = opts[id]; else el.value = opts[id]; });
+  const d = store.get("draft", {}); $("#title").value = d.title || ""; $("#desc").value = d.desc || "";
+  ["youtube", "instagram", "tiktok"].forEach(p => $("#desc_" + p).value = (d.pp || {})[p] || "");
+  if (Object.values(d.pp || {}).some(Boolean)) $("#perPlat").open = true;
+}
+
+/* ---------- presets ---------- */
+function presetText() {
+  const p = (state.settings.presets || []).find(x => x.id === $("#preset").value);
+  return p ? p.text : "";
+}
+function renderPresetSelect() {
+  const sel = $("#preset"), keep = sel.value || store.get("opts", {}).preset || "";
+  sel.innerHTML = `<option value="">None</option>` + (state.settings.presets || [])
+    .map(p => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)}</option>`).join("");
+  sel.value = (state.settings.presets || []).some(p => p.id === keep) ? keep : "";
+  updatePresetPreview();
+}
+function updatePresetPreview() {
+  const t = presetText().replace(/\s+/g, " ").trim();
+  $("#presetPreview").textContent = t ? "“" + (t.length > 48 ? t.slice(0, 48) + "…" : t) + "”" : "";
+  const needsCredit = /\{(creator|link)\}/.test(presetText());
+  $("#creditBox").hidden = !(needsCredit || $("#creator").value || $("#link").value);
+}
+$("#preset").addEventListener("change", () => { updatePresetPreview(); refreshUI(); });
+function renderPresetEditor() {
+  const list = $("#presetList");
+  const ps = state.settings.presets || [];
+  list.innerHTML = ps.length ? "" : `<div class="empty">No presets yet.</div>`;
+  ps.forEach(addPresetRow);
+}
+function addPresetRow(p) {
+  const list = $("#presetList"); const empty = list.querySelector(".empty"); if (empty) empty.remove();
+  const row = document.createElement("div"); row.className = "preset-edit"; row.dataset.id = p.id || "";
+  row.innerHTML = `<div class="row"><input type="text" class="pn" placeholder="Name, e.g. Repost credit" value="${escapeHtml(p.name || "")}">
+      <button class="small-btn" type="button" title="Delete preset">🗑</button></div>
+    <textarea class="pt" placeholder="🎥 Credit: {creator}\n{link}\n#anime #edit">${escapeHtml(p.text || "")}</textarea>`;
+  row.querySelector("button").onclick = () => row.remove();
+  list.append(row);
+}
+function readPresetEditor() {
+  return $$("#presetList .preset-edit").map(r => ({ id: r.dataset.id || undefined,
+    name: r.querySelector(".pn").value, text: r.querySelector(".pt").value }))
+    .filter(p => p.name.trim() || p.text.trim());
+}
+$("#addPreset").onclick = () => addPresetRow({ name: "", text: "" });
+document.addEventListener("click", (e) => {
+  if (e.target.closest("[data-edit-presets]")) {
+    $("#settings").showModal();
+    setTimeout(() => $("#presetsSet").scrollIntoView({ block: "start" }), 50);
+  }
+});
+["#creator", "#link"].forEach(id => $(id).addEventListener("input", refreshUI));
+
+function filledPreset(title) {
+  const vals = { creator: $("#creator").value.trim(), link: $("#link").value.trim(), title: (title ?? $("#title").value).trim() };
+  return presetText().split("\n").filter(l => [...l.matchAll(/\{(creator|link|title)\}/g)].every(m => vals[m[1]]))
+    .map(l => l.replace(/\{(creator|link|title)\}/g, (_, k) => vals[k])).join("\n").trim();
+}
+function captionFor(p) {
+  const extra = filledPreset(), ov = $("#desc_" + p) ? $("#desc_" + p).value.trim() : "";
+  const desc = [ov || $("#desc").value.trim(), extra].filter(Boolean).join("\n\n");
+  if (p === "youtube") return desc;
+  return ov ? desc : [$("#title").value.trim(), desc].filter(Boolean).join("\n\n");
+}
+function captionLength() {
+  return Math.max(0, ...selected().filter(p => p !== "youtube").map(p => captionFor(p).length));
+}
+
+function selected() { return $$("[data-toggle]").filter(t => t.checked && !t.disabled).map(t => t.dataset.toggle); }
+
+function refreshUI() {
+  const tl = $("#title").value.length, tc = $("#titleCount");
+  tc.textContent = `${tl} / 100`; tc.classList.toggle("over", tl > 100);
+  const cap = captionLength(), dc = $("#descCount");
+  const capPlatforms = selected().some(p => p !== "youtube");
+  dc.textContent = capPlatforms ? `caption ${cap} / 2200` : `${$("#desc").value.length} / 5000`;
+  dc.classList.toggle("over", capPlatforms ? cap > 2200 : $("#desc").value.length > 5000);
+  $$(".plat").forEach(c => c.classList.toggle("off", !c.querySelector("[data-toggle]").checked));
+  [["youtube", 5000], ["instagram", 2200], ["tiktok", 2200]].forEach(([p, lim]) => {
+    const el = document.querySelector(`[data-cnt="${p}"]`), n = captionFor(p).length;
+    el.textContent = `${n} / ${lim}`; el.classList.toggle("over", n > lim);
+  });
+  updatePresetPreview();
+
+  const direct = $("#tt_mode").value === "direct";
+  $("#tt_privacy").style.display = direct ? "" : "none";
+  $("#tt_comments_wrap").style.display = direct ? "" : "none";
+  $("#tt_note").textContent = direct
+    ? "Until your TikTok app passes TikTok's audit, direct posts are forced to 'Only me' and your account must be private."
+    : whenMode() === "now"
+      ? "Lands in your TikTok inbox — tap the notification in the app, paste the caption (copied for you) and post."
+      : "At post time it lands in your TikTok inbox — tap the notification in the app, add your caption and post.";
+
+  const mode = whenMode();
+  $("#whenAt").hidden = mode !== "at";
+  $("#whenDaily").hidden = mode !== "daily";
+  const badTime = mode === "at" && !(new Date($("#whenTime").value) > new Date());
+  const busy = polling !== null;
+  $("#go").disabled = busy || !file || selected().length === 0 || tl > 100 || badTime;
+  const n = selected().length ? " to " + selected().length : "";
+  $("#go").textContent = busy ? (mode === "now" ? "Uploading…" : "Saving…")
+    : mode === "now" ? `Upload${n}` : mode === "at" ? `Schedule${n}` : `Add to queue`;
+}
+
+function whenMode() { return (document.querySelector('input[name="when"]:checked') || {}).value || "now"; }
+function fmtWhen(ts) {
+  const d = new Date(ts * 1000), now = new Date();
+  const day = d.toDateString() === now.toDateString() ? "Today"
+    : d.toDateString() === new Date(now.getTime() + 864e5).toDateString() ? "Tomorrow"
+    : d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+  return `${day}, ${d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`;
+}
+function toLocalInput(d) {
+  const z = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+  return z.toISOString().slice(0, 16);
+}
+
+["#title", "#desc", "#desc_youtube", "#desc_instagram", "#desc_tiktok"].forEach(s => $(s).addEventListener("input", () => { refreshUI(); saveForm(); }));
+document.addEventListener("change", (e) => { if (e.target.closest("main")) { refreshUI(); saveForm(); } });
+$("#clear").onclick = () => { $("#title").value = ""; $("#desc").value = "";
+  ["youtube", "instagram", "tiktok"].forEach(p => $("#desc_" + p).value = ""); saveForm(); refreshUI(); };
+document.addEventListener("keydown", (e) => { if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && !$("#go").disabled) upload(); });
+
+const PRIVACY_LABELS = { PUBLIC_TO_EVERYONE: "Everyone", MUTUAL_FOLLOW_FRIENDS: "Friends", FOLLOWER_OF_CREATOR: "Followers", SELF_ONLY: "Only me" };
+async function loadTikTokInfo() {
+  if (!state.platforms.tiktok?.connected || ttInfo) return;
+  try {
+    ttInfo = await api("/api/tiktok/creator_info");
+    const sel = $("#tt_privacy"); sel.innerHTML = "";
+    (ttInfo.privacy_level_options || ["SELF_ONLY"]).forEach(o => sel.add(new Option(PRIVACY_LABELS[o] || o, o)));
+    const saved = store.get("opts", {}).tt_privacy; if (saved) sel.value = saved;
+    if (!sel.value) sel.value = "SELF_ONLY";
+    if (file) showInfo();
+  } catch (e) { /* shown on upload instead */ }
+}
+
+/* ---------- upload ---------- */
+function renderProgress(job, caption) {
+  const box = $("#progress"); box.style.display = "block";
+  const rows = job.prepare ? [["_video", job.prepare]] : [];
+  box.innerHTML = rows.concat(Object.entries(job.platforms)).map(([p, e]) => `
+    <div class="prog ${e.state}">
+      <div class="prog-top"><strong>${p === "_video" ? "Video" : NAMES[p]}</strong><span>${e.state === "done" ? "✓" : e.state === "error" ? "✕" : Math.round(e.progress) + "%"}</span></div>
+      <div class="bar"><i style="width:${e.state === "error" ? 100 : e.progress}%"></i></div>
+      <div class="prog-msg">${escapeHtml(e.message)}
+        ${e.url ? ` · <a href="${escapeHtml(e.url)}" target="_blank" rel="noopener">Open</a>` : ""}
+        ${p === "tiktok" && e.state === "done" && job.ttDraft ? ` · <a href="#" data-copy>Copy caption</a>` : ""}
+      </div>
+    </div>`).join("");
+  box.querySelectorAll("[data-copy]").forEach(a => a.onclick = (ev) => { ev.preventDefault(); copy(caption); });
+}
+
+async function copy(text) {
+  try { await navigator.clipboard.writeText(text); toast("Caption copied"); } catch { toast("Couldn't copy automatically", true); }
+}
+
+function buildForm(src, o) {
+  // src: a File, or {serverName}. o: {title, creator, link, mode, whenTs, cover, trim}
+  const fd = new FormData();
+  if (src.serverName) fd.append("local_file", src.serverName); else fd.append("video", src);
+  fd.append("title", o.title); fd.append("description", $("#desc").value);
+  selected().forEach(p => fd.append("platforms", p));
+  ["youtube", "instagram", "tiktok"].forEach(p => fd.append("desc_" + p, $("#desc_" + p).value));
+  fd.append("preset", $("#preset").value);
+  fd.append("creator", o.creator || ""); fd.append("link", o.link || "");
+  fd.append("fix", $("#fix").checked ? "1" : "0"); fd.append("fit", $("#fit").value);
+  fd.append("trim", o.trim ? "1" : "0");
+  if (o.cover !== null && o.cover !== undefined) fd.append("ig_thumb", String(o.cover));
+  fd.append("yt_privacy", $("#yt_privacy").value);
+  fd.append("yt_shorts_tag", $("#yt_shorts_tag").checked ? "1" : "0");
+  fd.append("yt_notify", $("#yt_notify").checked ? "1" : "0");
+  fd.append("yt_kids", $("#yt_kids").checked ? "1" : "0");
+  fd.append("ig_feed", $("#ig_feed").checked ? "1" : "0");
+  fd.append("tt_mode", $("#tt_mode").value);
+  fd.append("tt_privacy", $("#tt_privacy").value || "SELF_ONLY");
+  fd.append("tt_no_comments", $("#tt_no_comments").checked ? "1" : "0");
+  fd.append("when_mode", o.mode);
+  if (o.mode === "at") fd.append("when_ts", String(o.whenTs));
+  return fd;
+}
+
+function upload() {
+  const plats = selected(); if (!file || !plats.length) return;
+  const mode = whenMode();
+  const fd = buildForm(file, { title: $("#title").value, creator: $("#creator").value, link: $("#link").value,
+    mode, whenTs: mode === "at" ? new Date($("#whenTime").value).getTime() / 1000 : null,
+    cover: coverMs, trim: $("#trim").checked });
+  const caption = captionFor("tiktok");
+  const ttDraft = plats.includes("tiktok") && $("#tt_mode").value === "draft" && mode === "now";
+  if (ttDraft) copy(caption);
+
+  polling = "sending"; refreshUI();
+  const fake = { platforms: Object.fromEntries(plats.map(p => [p, { state: "running", progress: 0, message: "Reading file…" }])) };
+  renderProgress(fake);
+
+  const xhr = new XMLHttpRequest();
+  xhr.open("POST", "/api/upload"); xhr.setRequestHeader("X-Shorts-Uploader", "1");
+  xhr.upload.onprogress = (e) => {
+    if (!e.lengthComputable) return;
+    plats.forEach(p => fake.platforms[p].message = `Preparing file… ${Math.round(100 * e.loaded / e.total)}%`);
+    renderProgress(fake);
+  };
+  xhr.onload = () => {
+    let body = {}; try { body = JSON.parse(xhr.responseText); } catch {}
+    if (xhr.status !== 200) { polling = null; refreshUI(); $("#progress").style.display = "none"; return toast(body.error || "Upload failed", true); }
+    if (body.scheduled) {
+      polling = null; $("#progress").style.display = "none";
+      toast(`Scheduled for ${fmtWhen(body.scheduled.when)}`);
+      $("#title").value = ""; $("#desc").value = ""; saveForm(); resetFile(); loadQueue();
+      return;
+    }
+    poll(body.job_id, caption, ttDraft);
+  };
+  xhr.onerror = () => { polling = null; refreshUI(); toast("Lost connection to the uploader. Is it still running?", true); };
+  xhr.send(fd);
+}
+$("#go").onclick = upload;
+
+function poll(id, caption, ttDraft) {
+  polling = setInterval(async () => {
+    try {
+      const job = await api("/api/jobs/" + id); job.ttDraft = ttDraft;
+      renderProgress(job, caption);
+      if (job.done) {
+        clearInterval(polling); polling = null; refreshUI(); loadHistory();
+        const failed = Object.values(job.platforms).filter(e => e.state === "error").length;
+        if (!failed) { toast("All done 🎉"); $("#title").value = ""; $("#desc").value = ""; saveForm(); refreshUI(); }
+        else toast(`${failed} upload${failed > 1 ? "s" : ""} failed — see details.`, true);
+      }
+    } catch (e) { /* keep polling */ }
+  }, 1000);
+  refreshUI();
+}
+
+async function loadHistory() {
+  const h = await api("/api/history").catch(() => []);
+  $("#historyBox").style.display = h.length ? "" : "none";
+  $("#hist").innerHTML = h.map(item => `
+    <div class="hist-item">
+      <span class="t">${escapeHtml(item.title || item.file)}</span>
+      <span class="when">${new Date(item.time * 1000).toLocaleString()}</span>
+      ${Object.entries(item.results).map(([p, r]) => r.url
+        ? `<a class="tag ok" href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${NAMES[p]} ↗</a>`
+        : `<span class="tag ${r.state === "done" ? "ok" : "bad"}" title="${escapeHtml(r.message)}">${NAMES[p]} ${r.state === "done" ? "✓" : "✕"}</span>`).join("")}
+    </div>`).join("");
+}
+
+/* ---------- tabs ---------- */
+function showTab(name) {
+  $$(".tabs button").forEach(b => b.classList.toggle("active", b.dataset.tab === name));
+  $("#uploadView").hidden = name !== "upload";
+  $("#downloadView").hidden = name !== "download";
+  $("#queueView").hidden = name !== "queue";
+  history.replaceState(null, "", name === "upload" ? "/" : "#" + name);
+  if (name === "download") { loadTools(); loadDownloads(); setTimeout(() => $("#dlUrl").focus(), 0); }
+  if (name === "queue") loadQueue();
+}
+$$(".tabs button").forEach(b => b.onclick = () => showTab(b.dataset.tab));
+
+/* ---------- downloader ---------- */
+let dlPolling = null, toolPolling = null, tools = null;
+
+async function loadTools() {
+  try { tools = await api("/api/downloader/status"); } catch { return; }
+  const ins = tools.install, line = $("#toolLine");
+  if (ins.running) {
+    line.innerHTML = `<span>Installing the downloader… this takes a minute.</span>`;
+    if (!toolPolling) toolPolling = setInterval(loadTools, 2000);
+    return;
+  }
+  if (toolPolling) { clearInterval(toolPolling); toolPolling = null;
+    if (ins.ok === false) toast("Install failed — see the black window, or try again.", true);
+    else if (ins.needs_restart) toast("Updated. Close the black window and run start.bat again to use the new version.");
+    else if (ins.ok) toast("Downloader ready");
+  }
+  if (!tools.ytdlp) {
+    line.innerHTML = `<span class="bad">The downloader isn't installed yet.</span>
+      <button class="small-btn" id="installTools">Install downloader</button>`;
+  } else {
+    const missing = [];
+    if (!tools.ffmpeg) missing.push("ffmpeg (HD needs it)");
+    if (!tools.deno) missing.push("Deno (YouTube needs it)");
+    line.innerHTML = `<span>yt-dlp <b>${escapeHtml(tools.ytdlp)}</b></span>
+      ${missing.length ? `<span class="bad">Missing: ${missing.join(", ")}</span>` : `<span>· ffmpeg ✓ · Deno ✓</span>`}
+      ${tools.cookies_file ? `<span>· cookies.txt ✓</span>` : ""}
+      <button class="small-btn" id="installTools">${missing.length ? "Fix / update" : "Update downloader"}</button>`;
+  }
+  $("#dlGo").disabled = !tools.ytdlp || dlPolling !== null;
+  $("#installTools").onclick = async (e) => {
+    e.target.disabled = true;
+    try { await api("/api/downloader/install", { method: "POST" }); } catch (err) { toast(err.message, true); }
+    loadTools();
+  };
+}
+
+function renderDl(job) {
+  const box = $("#dlProgress"); box.style.display = "block";
+  box.innerHTML = `<div class="prog ${job.state}">
+    <div class="prog-top"><strong>${escapeHtml(job.title || job.url)}</strong>
+      <span>${job.state === "done" ? "✓" : job.state === "error" ? "✕" : Math.round(job.progress) + "%"}</span></div>
+    <div class="bar"><i style="width:${job.state === "error" ? 100 : job.progress}%"></i></div>
+    <div class="prog-msg">${escapeHtml(job.message)}
+      ${job.state === "done" && job.files.length === 1 ? ` · <a href="#" data-use="${escapeHtml(job.files[0])}">Use in uploader</a>` : ""}</div>
+  </div>`;
+}
+
+async function startDownload() {
+  const url = $("#dlUrl").value.trim();
+  if (!url) return $("#dlUrl").focus();
+  try {
+    const { job_id } = await api("/api/download", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url, browser: $("#dlBrowser").value }) });
+    $("#dlGo").disabled = true; $("#dlGo").textContent = "Downloading…";
+    renderDl({ url, state: "running", progress: 0, message: "Looking up video", files: [] });
+    dlPolling = setInterval(async () => {
+      let job; try { job = await api("/api/download/" + job_id); } catch { return; }
+      renderDl(job);
+      if (job.state !== "running") {
+        clearInterval(dlPolling); dlPolling = null;
+        $("#dlGo").disabled = false; $("#dlGo").textContent = "Download";
+        if (job.state === "done") { $("#dlUrl").value = ""; loadDownloads(); }
+      }
+    }, 700);
+  } catch (e) { toast(e.message, true); }
+}
+$("#dlGo").onclick = startDownload;
+$("#dlUrl").addEventListener("keydown", (e) => { if (e.key === "Enter" && !$("#dlGo").disabled) startDownload(); });
+$("#dlUrl").addEventListener("paste", () => setTimeout(() => {
+  if (/^https?:\/\//.test($("#dlUrl").value.trim()) && !$("#dlGo").disabled) startDownload();
+}, 0));
+$("#dlBrowser").value = store.get("dlBrowser", "");
+$("#dlBrowser").onchange = () => store.set("dlBrowser", $("#dlBrowser").value);
+$("#openFolder").onclick = () => api("/api/downloads/open-folder", { method: "POST" }).catch(e => toast(e.message, true));
+
+let downloads = [];
+async function loadDownloads() {
+  downloads = await api("/api/downloads").catch(() => []);
+  $("#dlFiles").innerHTML = downloads.length ? downloads.map(f => `
+    <div class="file-row">
+      <div class="fn"><div title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</div>
+        <div>${f.creator ? `<span class="cr">${escapeHtml(f.creator)}</span> · ` : ""}${fmtSize(f.size)} · ${new Date(f.time * 1000).toLocaleString()}</div></div>
+      <div class="acts">
+        <button class="small-btn" data-use="${escapeHtml(f.name)}">Use in uploader</button>
+        <button class="small-btn" data-del="${escapeHtml(f.name)}" title="Delete file">🗑</button>
+      </div>
+    </div>`).join("") : `<div class="empty">Nothing yet. Paste a link above.</div>`;
+}
+
+document.addEventListener("click", async (e) => {
+  const use = e.target.closest("[data-use]"), del = e.target.closest("[data-del]");
+  if (use) {
+    e.preventDefault();
+    if (!downloads.find(f => f.name === use.dataset.use)) await loadDownloads();
+    const item = downloads.find(f => f.name === use.dataset.use);
+    if (!item) return toast("That file isn't there any more.", true);
+    setServerFile(item); showTab("upload"); $("#title").focus();
+  }
+  if (del) {
+    if (!confirm(`Delete "${del.dataset.del}"?`)) return;
+    try {
+      downloads = await api("/api/downloads/delete", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: del.dataset.del }) });
+      if (file && file.serverName === del.dataset.del) location.reload();
+      loadDownloads();
+    } catch (err) { toast(err.message, true); }
+  }
+});
+
+/* ---------- schedule / queue ---------- */
+let queue = { items: [] };
+const STATUS_TEXT = { scheduled: "Scheduled", running: "Posting now", preparing: "Preparing video", error: "Needs attention" };
+
+async function loadQueue() {
+  try { queue = await api("/api/queue"); } catch { return; }
+  const active = queue.items.filter(i => i.status !== "done");
+  $("#qCount").hidden = !active.length; $("#qCount").textContent = active.length;
+  $("#nextSlot").textContent = fmtWhen(queue.next_slot);
+  if (document.activeElement !== $("#dailyTime")) $("#dailyTime").value = queue.daily_time;
+  $("#autostartWrap").hidden = !queue.autostart_supported;
+  $("#autostart").checked = queue.autostart;
+  if ($("#queueView").hidden) return;
+
+  $("#qList").innerHTML = active.length ? active.map(i => {
+    const running = i.status === "running" || i.status === "preparing";
+    const errors = Object.entries(i.results || {}).filter(([, r]) => r.state === "error");
+    if (i.prep_error) errors.unshift(["_video", { message: i.prep_error }]);
+    const prepLine = i.status === "preparing" ? `Converting… ${(i.prep || {}).progress || 0}%`
+      : (i.prep && i.prep.message && !i.prep_error ? i.prep.message : "");
+    return `<div class="q-item ${i.status}" data-id="${i.id}">
+      <div>
+        <div class="q-title" title="${escapeHtml(i.filename)}">${escapeHtml(i.title || i.filename)}</div>
+        <div class="q-when"><b>${i.status === "running" ? "Posting now…" : fmtWhen(i.when)}</b> · ${STATUS_TEXT[i.status] || i.status} · ${fmtSize(i.size)}</div>
+        ${prepLine ? `<div class="q-when">${escapeHtml(prepLine)}</div>` : ""}
+        <div class="q-tags">${i.platforms.map(p => {
+          const r = (i.results || {})[p];
+          const cls = r ? (r.state === "done" ? "ok" : "bad") : "";
+          return `<span class="tag ${cls}">${NAMES[p]}${r ? (r.state === "done" ? " ✓" : " ✕") : ""}</span>`;
+        }).join("")}</div>
+      </div>
+      <div class="q-acts">${i.status === "running" ? "" : i.status === "preparing"
+        ? `<button class="small-btn" data-q="remove" title="Remove from queue">🗑</button>` : `
+        <button class="small-btn" data-q="post-now">${i.status === "error" ? "Retry now" : "Post now"}</button>
+        <button class="small-btn" data-q="edit">Change time</button>
+        <button class="small-btn" data-q="remove" title="Remove from queue">🗑</button>`}</div>
+      ${errors.length ? `<div class="q-msg">${errors.map(([p, r]) => `${p === "_video" ? "Video" : NAMES[p]}: ${escapeHtml(r.message)}`).join("<br>")}
+        <br><span style="color:var(--muted)">${i.prep_error ? "Retry tries converting the video again." : "Retrying only re-posts the platforms that failed."}</span></div>` : ""}
+    </div>`;
+  }).join("") : `<div class="empty">Nothing scheduled. On the Upload tab, pick “Pick a time” or “Next daily slot”.</div>`;
+}
+
+async function queueAction(id, action, body) {
+  try {
+    queue = await api(`/api/queue/${id}/${action}`, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || {}) });
+  } catch (e) { toast(e.message, true); }
+  loadQueue();
+}
+
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-q]"); if (!b) return;
+  const row = b.closest(".q-item"), id = row.dataset.id, item = queue.items.find(i => i.id === id);
+  if (b.dataset.q === "remove") { if (confirm(`Remove "${item.title || item.filename}" from the queue?`)) queueAction(id, "remove"); }
+  if (b.dataset.q === "post-now") queueAction(id, "post-now");
+  if (b.dataset.q === "edit") {
+    if (row.querySelector(".q-resched")) return;
+    const box = document.createElement("div"); box.className = "q-resched";
+    box.innerHTML = `<input type="datetime-local" value="${toLocalInput(new Date(Math.max(item.when * 1000, Date.now() + 3600e3)))}">
+      <button class="small-btn" data-save-time>Save</button><button class="small-btn" data-cancel-time>Cancel</button>`;
+    row.append(box);
+    box.querySelector("[data-cancel-time]").onclick = () => box.remove();
+    box.querySelector("[data-save-time]").onclick = () => {
+      const t = new Date(box.querySelector("input").value);
+      if (!(t > new Date())) return toast("Pick a time in the future.", true);
+      queueAction(id, "reschedule", { when: t.getTime() / 1000 });
+    };
+  }
+});
+document.addEventListener("click", (e) => { if (e.target.closest("[data-goto-queue]")) { showTab("queue"); $("#dailyTime").focus(); } });
+
+async function saveQueueSettings(body) {
+  try {
+    queue = await api("/api/queue/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    toast("Saved");
+  } catch (e) { toast(e.message, true); }
+  loadQueue();
+}
+$("#dailyTime").addEventListener("change", () => $("#dailyTime").value && saveQueueSettings({ daily_time: $("#dailyTime").value }));
+$("#autostart").addEventListener("change", () => saveQueueSettings({ autostart: $("#autostart").checked }));
+
+document.querySelectorAll('input[name="when"]').forEach(r => r.addEventListener("change", () => {
+  store.set("whenMode", whenMode());
+  if (whenMode() === "at" && !$("#whenTime").value) {
+    const d = new Date(Date.now() + 3600e3); d.setMinutes(0, 0, 0); $("#whenTime").value = toLocalInput(d);
+  }
+  if (whenMode() === "daily") loadQueue();
+  refreshUI();
+}));
+$("#whenTime").addEventListener("input", refreshUI);
+setInterval(() => { if (!$("#queueView").hidden) loadQueue(); }, 3000);
+setInterval(() => { if ($("#queueView").hidden) loadQueue(); }, 30000);
+
+/* ---------- bulk add ---------- */
+let bulkItems = [], bulkBusy = false;
+
+function sendForm(fd, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/upload"); xhr.setRequestHeader("X-Shorts-Uploader", "1");
+    xhr.upload.onprogress = (e) => e.lengthComputable && onProgress && onProgress(Math.round(100 * e.loaded / e.total));
+    xhr.onload = () => {
+      let body = {}; try { body = JSON.parse(xhr.responseText); } catch {}
+      xhr.status === 200 ? resolve(body) : reject(new Error(body.error || `Failed (${xhr.status})`));
+    };
+    xhr.onerror = () => reject(new Error("Lost connection to the app"));
+    xhr.send(fd);
+  });
+}
+
+$("#openBulk").onclick = async () => {
+  if (!selected().length) return toast("Turn on at least one platform first.", true);
+  bulkItems = bulkItems.filter(b => b.state === "ready");
+  await loadQueue();
+  $("#bulkStart").textContent = fmtWhen(queue.next_slot);
+  downloads = await api("/api/downloads").catch(() => []);
+  $("#bulkDl").innerHTML = downloads.length ? downloads.map((f, i) => `<label>
+      <input type="checkbox" data-bdl="${i}" ${bulkItems.some(b => b.dl === f.name) ? "checked" : ""}>
+      <span>${escapeHtml(f.name)}${f.creator ? " · " + escapeHtml(f.creator) : ""}</span></label>`).join("")
+    : `<div class="empty">No downloads yet.</div>`;
+  $("#bulkNote").textContent = `Platforms: ${selected().map(p => NAMES[p]).join(", ")}`;
+  renderBulk(); $("#bulk").showModal();
+};
+$("#closeBulk").onclick = () => { if (!bulkBusy) $("#bulk").close(); };
+$("#bulkPick").onclick = () => $("#bulkFiles").click();
+$("#bulkFiles").onchange = () => { [...$("#bulkFiles").files].forEach(addBulkFile); $("#bulkFiles").value = ""; };
+
+function addBulkFile(f) {
+  if (!/\.(mp4|mov|m4v|webm)$/i.test(f.name)) return toast(`Skipped ${f.name}: not a video file`, true);
+  bulkItems.push({ src: f, name: f.name, size: f.size, title: titleFromName(f.name), creator: "", link: "", state: "ready" });
+  renderBulk();
+}
+document.addEventListener("change", (e) => {
+  const cb = e.target.closest("[data-bdl]"); if (!cb) return;
+  const f = downloads[+cb.dataset.bdl];
+  if (cb.checked) bulkItems.push({ src: { serverName: f.name }, dl: f.name, name: f.name, size: f.size,
+    title: titleFromName(f.name), creator: f.creator || "", link: f.link || "", state: "ready" });
+  else bulkItems = bulkItems.filter(b => !(b.dl === f.name && b.state === "ready"));
+  renderBulk();
+});
+
+function renderBulk() {
+  $("#bulkList").innerHTML = bulkItems.map((b, i) => {
+    const locked = b.state !== "ready";
+    return `<div class="bulk-row ${b.state}" data-bi="${i}">
+      <input type="text" class="bt" value="${escapeHtml(b.title)}" placeholder="Title" maxlength="100" ${locked ? "disabled" : ""}>
+      <input type="text" class="cr bc" value="${escapeHtml(b.creator)}" placeholder="@creator" ${locked ? "disabled" : ""}>
+      <button class="small-btn" data-brm title="Remove" ${b.state === "sending" ? "disabled" : ""}>✕</button>
+      <div class="src">${escapeHtml(b.name)} · ${fmtSize(b.size)}</div>
+      ${b.msg ? `<div class="st">${escapeHtml(b.msg)}</div>` : ""}
+    </div>`;
+  }).join("");
+  const ready = bulkItems.filter(b => b.state === "ready").length;
+  $("#bulkGo").disabled = bulkBusy || !ready || bulkItems.some(b => b.state === "ready" && !b.title.trim() && selected().includes("youtube"));
+  $("#bulkGo").textContent = bulkBusy ? "Adding…" : `Add ${ready} to queue`;
+}
+$("#bulkList").addEventListener("input", (e) => {
+  const row = e.target.closest("[data-bi]"); if (!row) return;
+  const b = bulkItems[+row.dataset.bi];
+  if (e.target.classList.contains("bt")) b.title = e.target.value;
+  if (e.target.classList.contains("bc")) b.creator = e.target.value;
+  $("#bulkGo").disabled = bulkBusy || !bulkItems.some(x => x.state === "ready");
+});
+$("#bulkList").addEventListener("click", (e) => {
+  const rm = e.target.closest("[data-brm]"); if (!rm) return;
+  bulkItems.splice(+rm.closest("[data-bi]").dataset.bi, 1); renderBulk();
+});
+
+$("#bulkGo").onclick = async () => {
+  bulkBusy = true; renderBulk();
+  let ok = 0;
+  for (const b of bulkItems.filter(x => x.state === "ready")) {
+    b.state = "sending"; b.msg = "Sending…"; renderBulk();
+    try {
+      const body = await sendForm(buildForm(b.src, { title: b.title, creator: b.creator, link: b.link, mode: "daily" }),
+        (pct) => { b.msg = `Sending… ${pct}%`; renderBulk(); });
+      b.state = "done"; ok++;
+      b.msg = `Queued for ${fmtWhen(body.scheduled.when)}${body.scheduled.status === "preparing" ? " (converting in the background)" : ""}`;
+    } catch (err) { b.state = "error"; b.msg = err.message; }
+    renderBulk();
+  }
+  bulkBusy = false; renderBulk(); loadQueue();
+  toast(ok ? `Added ${ok} video${ok > 1 ? "s" : ""} to the queue` : "Nothing was added", !ok);
+};
+
+/* ---------- app version & updates ---------- */
+let appInfo = null, offlineSince = null;
+
+function renderApp(a) {
+  appInfo = a;
+  $("#appVersion").textContent = a.version;
+  $("#autoUpdate").checked = a.auto;
+  let st;
+  if (a.update_available) st = `<span class="new">Version ${escapeHtml(a.latest)} is available</span>`;
+  else if (a.error) st = `<span style="color:var(--warn)">${escapeHtml(a.error)}</span>`;
+  else if (a.last_check) st = `<span class="ok">Up to date</span> · checked ${new Date(a.last_check * 1000).toLocaleString()}`;
+  else st = "";
+  $("#appStatus").innerHTML = st;
+  $("#checkUpdates").textContent = a.update_available ? (a.launched ? "Update now" : "Check again") : "Check for updates";
+  if (!a.launched) $("#appNote").textContent = "Updates install when you start the app with its Start Menu icon (or start.bat).";
+}
+
+async function loadApp() {
+  try {
+    const a = await api("/api/app");
+    if (offlineSince) {  // we were restarting: load the new version of the page
+      location.reload(); return;
+    }
+    if (appInfo && appInfo.version !== a.version) { location.reload(); return; }
+    renderApp(a);
+    if (a.just_updated && store.get("seenVersion", "") !== a.version) {
+      store.set("seenVersion", a.version);
+      showWhatsNew(a);
+    }
+  } catch (e) {
+    if (!offlineSince) offlineSince = Date.now();
+    showRestarting();
+  }
+}
+
+function showRestarting() {
+  const o = $("#restartOverlay"); o.hidden = false;
+  const long = offlineSince && Date.now() - offlineSince > 60000;
+  $("#roTitle").textContent = (appInfo && appInfo.restarting) || !long ? "Restarting…" : "Can't reach Shorts Uploader";
+  $("#roText").textContent = long
+    ? "It may have been closed. Open it again from the Start Menu or desktop icon."
+    : "Shorts Uploader is restarting (usually to install an update). This page will come back in a few seconds.";
+}
+
+function showWhatsNew(a) {
+  toast(`Updated to version ${a.version}`);
+  if (!a.whats_new) return;
+  $("#appStatus").innerHTML = `<span class="ok">Just updated</span><div class="whats-new">${escapeHtml(a.whats_new.replace(/^## .*\n/, ""))}</div>`;
+}
+
+$("#checkUpdates").onclick = async () => {
+  const btn = $("#checkUpdates"); btn.disabled = true; btn.textContent = "Checking…";
+  try {
+    const a = await api("/api/app/check", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ install: true }) });
+    renderApp(a);
+    if (a.result === "restarting") { appInfo.restarting = true; offlineSince = Date.now(); showRestarting(); }
+    else if (a.result === "busy") toast("Update ready — it'll install as soon as uploads and conversions finish.");
+    else if (a.result === "manual") toast("Update ready — close the app and start it again to install it.");
+    else if (a.result === "current") toast("You're up to date.");
+    else if (a.result === "error") toast(a.error || "Couldn't check for updates", true);
+  } catch (e) { toast(e.message, true); }
+  btn.disabled = false; if (appInfo) renderApp(appInfo);
+};
+$("#autoUpdate").onchange = async () => {
+  try { renderApp(await api("/api/app/settings", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ auto: $("#autoUpdate").checked }) })); } catch (e) { toast(e.message, true); }
+};
+$("#quitApp").onclick = async () => {
+  const waiting = (queue.items || []).filter(i => i.status === "scheduled").length;
+  if (!confirm(waiting ? `Quit Shorts Uploader? ${waiting} scheduled post${waiting > 1 ? "s" : ""} won't go out until you open it again.`
+                       : "Quit Shorts Uploader?")) return;
+  try { await api("/api/app/quit", { method: "POST" }); } catch {}
+  document.body.innerHTML = `<div style="display:grid;place-items:center;height:100vh;font:16px system-ui;color:var(--muted)">
+    Shorts Uploader has been closed. You can close this window.</div>`;
+  setTimeout(() => window.close(), 800);
+};
+setInterval(() => { if (!document.hidden || offlineSince) loadApp(); }, 4000);
+
+/* ---------- boot ---------- */
+(async () => {
+  restoreForm();
+  const q = new URLSearchParams(location.search);
+  if (q.get("error")) toast(q.get("error"), true);
+  if (q.get("connected")) toast(`${NAMES[q.get("connected")] || q.get("connected")} connected`);
+  if (q.toString()) history.replaceState(null, "", "/" + location.hash);
+  if (location.hash === "#download") showTab("download");
+  if (location.hash === "#queue") showTab("queue");
+  const savedMode = store.get("whenMode", "now");
+  const radio = document.querySelector(`input[name="when"][value="${savedMode === "at" ? "now" : savedMode}"]`);
+  if (radio) radio.checked = true;
+  loadQueue();
+  try { applyStatus(await api("/api/status")); } catch (e) { toast(e.message, true); }
+  if (!location.hash && !Object.values(state.platforms).some(p => p.connected)) $("#settings").showModal();
+  loadHistory(); loadApp();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,21 @@
+# What's new
+
+## 1.4.0
+- Installs like a real app: Start Menu and desktop icon, opens in its own window.
+- Updates itself automatically from GitHub, and rolls back if an update won't start.
+- Tray icon keeps it running for scheduled posts (Open, Check for updates, Quit).
+- Settings → App: version, check for updates, auto-update switch, Quit.
+
+## 1.3.0
+- Auto-fix format (vertical 1080×1920 MP4, blurred background or crop, trim to 3:00).
+- Bulk add to the queue, per-platform captions, caption presets with {creator}/{link}/{title}.
+- Instagram cover frame picker. Downloads remember the original creator and link.
+
+## 1.2.0
+- Scheduling: post at a set time or one per day, Queue tab, Start with Windows.
+
+## 1.1.0
+- Download tab: save videos from YouTube, Instagram, TikTok links.
+
+## 1.0.0
+- Upload one video to YouTube Shorts, Instagram Reels and TikTok at once.
