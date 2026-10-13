@@ -15,6 +15,7 @@ import uuid
 from urllib.parse import quote
 
 from flask import Flask, Response, abort, jsonify, redirect, render_template, request, send_file, session
+from werkzeug.datastructures import MultiDict
 from werkzeug.utils import secure_filename
 
 import downloader
@@ -383,30 +384,37 @@ def tiktok_creator_info():
 
 @app.post("/api/upload")
 def api_upload():
-    video = request.files.get("video")
-    local_name = request.form.get("local_file", "")
-    staged = staged_path(request.form.get("staged", ""))
+    body, code = _submit_post(request.form, request.files.get("video"))
+    return jsonify(body), code
+
+
+_slot_lock = threading.Lock()  # two posts added at once must not take the same post time
+
+
+def _submit_post(form, video=None):
+    """Post now or add to the queue, from upload-form fields. Returns (json body, status code)."""
+    local_name = form.get("local_file", "")
+    staged = staged_path(form.get("staged", ""))
     if local_name:
         local_path = downloader.safe_path(local_name)
         if not local_path:
-            return jsonify(error="That downloaded file isn't there any more."), 400
+            return dict(error="That downloaded file isn't there any more."), 400
         filename = local_name
     elif staged:
         local_path, filename = None, os.path.basename(staged).split("_", 1)[1]
-    elif request.form.get("staged"):
-        return jsonify(error="That video expired from the app's temporary storage. Add it again."), 400
+    elif form.get("staged"):
+        return dict(error="That video expired from the app's temporary storage. Add it again."), 400
     elif video and video.filename:
         local_path, filename = None, video.filename
     else:
-        return jsonify(error="Pick a video file first."), 400
+        return dict(error="Pick a video file first."), 400
     ext = os.path.splitext(filename)[1].lower()
     if ext not in ALLOWED_EXT:
-        return jsonify(error=f"Unsupported file type {ext}. Use MP4, MOV or WebM."), 400
+        return dict(error=f"Unsupported file type {ext}. Use MP4, MOV or WebM."), 400
 
-    form = request.form
     selected = [p for p in form.getlist("platforms") if p in PLATFORMS]
     if not selected:
-        return jsonify(error="Choose at least one platform."), 400
+        return dict(error="Choose at least one platform."), 400
     title = form.get("title", "").strip()
     description = form.get("description", "").strip()
     src_meta = downloader.meta(local_name) if local_name else {}
@@ -431,7 +439,7 @@ def api_upload():
     if os.path.getsize(path) == 0:
         if not local_path:
             os.remove(path)
-        return jsonify(error="That file is empty."), 400
+        return dict(error="That file is empty."), 400
 
     opts = {
         "youtube": {
@@ -452,22 +460,9 @@ def api_upload():
 
     mode = form.get("when_mode", "now")
     if mode in ("at", "daily"):
-        try:
-            if mode == "daily":
-                when = scheduler.next_daily_slot()
-            else:
-                when = float(form.get("when_ts", "0"))
-                if when < time.time() - 60:
-                    raise ValueError("That time has already passed.")
-        except ValueError as e:
-            if not local_path:
-                os.remove(path)
-            return jsonify(error=str(e) or "Pick a valid time."), 400
-        # Downloaded files are copied (you keep the original); fresh uploads are moved into the queue.
-        item = scheduler.add(path, move=not local_path, filename=filename, title=title, texts=texts,
-                             platforms=selected, opts=opts, when=when, fix=fix if fix["enabled"] else None,
-                             source=local_name or None)
-        return jsonify(scheduled=item)
+        with _slot_lock:
+            return _schedule_post(path, local_path, mode, form, filename, title, texts, selected, opts, fix,
+                                  local_name)
 
     job = _new_job(job_id, filename, title, selected)
     job["source_download"] = local_name or None
@@ -475,7 +470,26 @@ def api_upload():
         job["prepare"] = {"state": "queued", "progress": 0, "message": "Checking video format"}
     threading.Thread(target=_run_job, args=(job, path, texts, opts, not local_path),
                      kwargs={"fix": fix if fix["enabled"] else None}, daemon=True).start()
-    return jsonify(job_id=job_id)
+    return dict(job_id=job_id), 200
+
+
+def _schedule_post(path, local_path, mode, form, filename, title, texts, selected, opts, fix, local_name):
+    try:
+        if mode == "daily":
+            when = scheduler.next_daily_slot()
+        else:
+            when = float(form.get("when_ts", "0"))
+            if when < time.time() - 60:
+                raise ValueError("That time has already passed.")
+    except ValueError as e:
+        if not local_path:
+            os.remove(path)
+        return dict(error=str(e) or "Pick a valid time."), 400
+    # Downloaded files are copied (you keep the original); fresh uploads are moved into the queue.
+    item = scheduler.add(path, move=not local_path, filename=filename, title=title, texts=texts,
+                         platforms=selected, opts=opts, when=when, fix=fix if fix["enabled"] else None,
+                         source=local_name or None)
+    return dict(scheduled=item), 200
 
 
 def _new_job(job_id, filename, title, platforms):
@@ -633,8 +647,12 @@ def _downloads_with_status():
     for h in storage.load("history", default=[]):
         if any(r.get("state") == "done" for r in (h.get("results") or {}).values()):
             last_posted[h.get("file")] = max(last_posted.get(h.get("file"), 0), h.get("time") or 0)
+    with _auto_lock:
+        working = {i["local_file"]: i["state"] for i in _auto["items"] if i["local_file"] and i["state"] in AUTO_ACTIVE}
     files = downloader.list_files()
     for f in files:
+        if f["name"] in working:
+            f["auto"] = working[f["name"]]
         q = queued.get(f["name"])
         cleared = f.pop("cleared_at", None) or 0  # "Clear mark" forgets posts from before it
         posted = max(f.pop("posted_at", None) or 0, last_posted.get(f["name"], 0))
@@ -781,7 +799,7 @@ _app_state = {"restarting": False, "checking": False, "error": None}
 
 def _busy():
     """True while anything is uploading, downloading or converting (don't restart then)."""
-    if any(not j["done"] for j in list(_jobs.values())):
+    if any(not j["done"] for j in list(_jobs.values())) or _auto["workers"]:
         return True
     if any(j["state"] == "running" for j in list(downloader._jobs.values())) or downloader._install["running"]:
         return True
@@ -938,6 +956,165 @@ def api_summarize_job(job_id):
     if not job:
         abort(404)
     return jsonify(job)
+
+
+# ---------- auto-queue: AI writes each title + description, then it's queued (runs in the background) ----------
+
+AUTO_WORKERS = 2  # the summarizer only runs 2 at once anyway (free-tier rate limits)
+AUTO_ACTIVE = ("waiting", "ai", "queueing")
+_FORM_ONLY = {"local_file", "staged", "video", "title", "description", "tags", "creator", "link",
+              "when_mode", "when_ts", "ig_thumb"}
+_auto = {"items": [], "workers": 0, "stop": False}
+_auto_lock = threading.Lock()
+
+
+def title_from_name(name):
+    """'Video by someone [AbC123].mp4' -> 'Video by someone' (same as the page does)."""
+    t = re.sub(r"\s*\[[^\]]+\]\.[^.]+$", "", name or "")
+    t = re.sub(r"\.[^.]+$", "", t)
+    return re.sub(r"\s+", " ", t.replace("_", " ")).strip()[:100]
+
+
+def _auto_status():
+    with _auto_lock:
+        items = [{k: it.get(k) for k in ("key", "name", "local_file", "state", "message", "title", "when")}
+                 for it in _auto["items"]]
+        running = _auto["workers"] > 0
+    count = lambda *st: sum(1 for i in items if i["state"] in st)
+    return {"running": running, "items": items, "total": len(items), "queued": count("queued"),
+            "failed": count("error"), "left": count(*AUTO_ACTIVE), "stopped": count("stopped")}
+
+
+def _auto_one(it):
+    path = downloader.safe_path(it["local_file"]) if it["local_file"] else staged_path(it["staged"])
+    if not path:
+        raise ValueError("That video isn't there any more.")
+    ai = it.get("ai")
+    if not ai:
+        source = downloader.meta(it["local_file"]) if it["local_file"] else {}
+        hint = f"Originally by {it['creator']}" if it["creator"] else ""
+        r = summarizer.summarize(path, hint=hint, source=source, report=lambda m: it.update(message=m))
+        ai = {"title": (r["titles"] or [""])[0], "description": r["description"],
+              "tags": r["tags"]["post"] + r["tags"]["niche"] + r["tags"]["broad"]}
+    shared = it["shared"]
+    title = (it["title"] or ai.get("title") or title_from_name(it["name"])).strip()[:100]
+    desc = "\n\n".join(x for x in [ai.get("description", "").strip() if shared["ai_desc"] else "",
+                                    shared["description"].strip()] if x)
+    tags = parse_tags(", ".join([it["tags"], ", ".join(ai.get("tags") or []), shared["tags"]]))
+    fields = list(it["base"]) + [("title", title), ("description", desc), ("tags", ", ".join(tags)),
+                                 ("link", it["link"]), ("when_mode", "daily")]
+    if it["creator"]:
+        fields.append(("creator", it["creator"]))
+    fields.append(("local_file", it["local_file"]) if it["local_file"] else ("staged", it["staged"]))
+    it.update(state="queueing", message="Adding to the queue", title=title)
+    body, code = _submit_post(MultiDict(fields))
+    if code != 200:
+        raise ValueError(body.get("error") or "Couldn't add it to the queue.")
+    it.update(state="queued", message="Queued", when=body["scheduled"]["when"])
+
+
+def _auto_worker():
+    while True:
+        with _auto_lock:
+            if _auto["stop"]:
+                for i in _auto["items"]:
+                    if i["state"] == "waiting":
+                        i.update(state="stopped", message="Stopped")
+            it = next((i for i in _auto["items"] if i["state"] == "waiting"), None)
+            if not it:
+                _auto["workers"] -= 1
+                return
+            it.update(state="ai", message="Starting")
+        try:
+            _auto_one(it)
+        except summarizer.SummaryError as e:
+            it.update(state="error", message=str(e))
+        except ValueError as e:
+            it.update(state="error", message=str(e))
+        except Exception as e:  # keep going with the rest
+            it.update(state="error", message=f"Unexpected error: {type(e).__name__}: {e}")
+
+
+def _auto_kick():
+    """Start workers for waiting items (call with _auto_lock held)."""
+    _auto["stop"] = False
+    while _auto["workers"] < AUTO_WORKERS:
+        _auto["workers"] += 1
+        threading.Thread(target=_auto_worker, daemon=True).start()
+
+
+@app.get("/api/autoqueue")
+def api_autoqueue_status():
+    return jsonify(_auto_status())
+
+
+@app.post("/api/autoqueue")
+def api_autoqueue():
+    """Queue many videos: the AI writes each one's title, description and tags, then it's added to the queue.
+    Body: {items: [{local_file | staged, name, creator, link, tags, title?, title_locked?, ai?}],
+           base: [[field, value], ...] (the Upload tab's settings), description, tags, ai_description}"""
+    body = request.get_json(force=True) or {}
+    base = [(str(k), str(v)) for k, v in (body.get("base") or []) if str(k) not in _FORM_ONLY]
+    if not any(k == "platforms" and v in PLATFORMS for k, v in base):
+        return jsonify(error="Turn on at least one platform on the Upload tab first."), 400
+    shared = {"description": str(body.get("description") or ""), "tags": str(body.get("tags") or ""),
+              "ai_desc": bool(body.get("ai_description", True))}
+    new = []
+    for raw in (body.get("items") or [])[:500]:
+        local, staged = str(raw.get("local_file") or ""), str(raw.get("staged") or "")
+        if not local and not staged:
+            continue
+        ai = raw.get("ai") if isinstance(raw.get("ai"), dict) else None
+        if not ai and not summarizer.settings()["key"]:
+            return jsonify(error="Add a Gemini API key in Settings → AI summaries first (it's free)."), 400
+        new.append({
+            "key": ("dl:" + local) if local else ("st:" + staged), "local_file": local, "staged": staged,
+            "name": str(raw.get("name") or local or "video")[:200], "creator": str(raw.get("creator") or "")[:100],
+            "link": str(raw.get("link") or "")[:500], "tags": str(raw.get("tags") or "")[:1000],
+            "title": str(raw.get("title") or "")[:100] if raw.get("title_locked") else "", "ai": ai,
+            "base": base, "shared": shared, "state": "waiting", "message": "Waiting", "when": None,
+        })
+    if not new:
+        return jsonify(error="Pick some videos first."), 400
+    with _auto_lock:
+        if not _auto["workers"]:  # a fresh run: forget the last one's finished list
+            _auto["items"] = [i for i in _auto["items"] if i["state"] in AUTO_ACTIVE]
+        busy = {i["key"] for i in _auto["items"] if i["state"] in AUTO_ACTIVE}
+        _auto["items"] = [i for i in _auto["items"] if i["key"] not in {n["key"] for n in new} or i["key"] in busy]
+        _auto["items"] += [n for n in new if n["key"] not in busy]
+        _auto_kick()
+    return jsonify(_auto_status())
+
+
+@app.post("/api/autoqueue/stop")
+def api_autoqueue_stop():
+    """Don't start any more (ones the AI is already on still finish)."""
+    with _auto_lock:
+        _auto["stop"] = True
+        for i in _auto["items"]:
+            if i["state"] == "waiting":
+                i.update(state="stopped", message="Stopped")
+    return jsonify(_auto_status())
+
+
+@app.post("/api/autoqueue/retry")
+def api_autoqueue_retry():
+    """Try the failed and stopped ones again."""
+    with _auto_lock:
+        for i in _auto["items"]:
+            if i["state"] in ("error", "stopped"):
+                i.update(state="waiting", message="Waiting")
+        if any(i["state"] == "waiting" for i in _auto["items"]):
+            _auto_kick()
+    return jsonify(_auto_status())
+
+
+@app.post("/api/autoqueue/clear")
+def api_autoqueue_clear():
+    """Hide the finished list."""
+    with _auto_lock:
+        _auto["items"] = [i for i in _auto["items"] if i["state"] in AUTO_ACTIVE]
+    return jsonify(_auto_status())
 
 
 @app.post("/api/ai/settings")

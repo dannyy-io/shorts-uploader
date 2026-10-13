@@ -311,6 +311,20 @@
   .dl-sel { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; padding: 8px 0; font-size: 13px; color: var(--muted); }
   .dl-sel .grow { flex: 1; }
   .dl-pick .dl-st { margin: 0; flex: none; }
+
+  /* auto-queue (AI titles + descriptions, then queue) */
+  .auto-banner { border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line)); border-radius: 12px; padding: 12px 14px;
+                 margin: 6px 0 12px; background: color-mix(in srgb, var(--accent) 7%, var(--panel)); font-size: 14px; }
+  .auto-banner .top { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .auto-banner .top .grow { flex: 1; min-width: 120px; }
+  .auto-banner .bar { height: 5px; border-radius: 99px; background: var(--line); margin: 9px 0 4px; overflow: hidden; }
+  .auto-banner .bar i { display: block; height: 100%; background: var(--accent); transition: width .4s; }
+  .auto-banner .now, .auto-banner .fail { font-size: 12.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .auto-banner .fail { color: var(--err); white-space: normal; }
+  .auto-banner .bad { color: var(--err); }
+  .auto-banner details { margin-top: 6px; }
+  .auto-banner summary { cursor: pointer; font-size: 12.5px; color: var(--err); }
+  .bulk-row.auto .st { color: var(--accent); }
 </style>
 </head>
 <body>
@@ -501,6 +515,7 @@
       <h2>Downloaded videos</h2>
       <button class="small-btn" id="openFolder">Open folder</button>
     </div>
+    <div class="auto-banner" id="autoBanner" hidden></div>
     <div class="dl-filter" id="dlFilter"></div>
     <div class="dl-sel">
       <label style="display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" id="dlPickAll"> <span id="dlPickAllText">Select all</span></label>
@@ -660,10 +675,15 @@
     <details style="margin-top:10px"><summary style="cursor:pointer">Add from Downloads</summary><div class="dl-pick" id="bulkDl"></div></details>
     <div class="bulk-opts">
       <button class="ghost" type="button" id="bulkAi">✨ Generate titles &amp; tags</button>
-      <label><input type="checkbox" id="bulkAiDesc"> Start each description with its AI caption</label>
+      <label><input type="checkbox" id="bulkAiDesc" checked> Start each description with its AI caption</label>
     </div>
     <div id="bulkList"></div>
-    <div class="row"><button class="primary" id="bulkGo" disabled>Add to queue</button><span class="kbd" id="bulkNote"></span></div>
+    <div class="row" style="flex-wrap:wrap">
+      <button class="primary" id="bulkAuto" disabled title="The AI writes each title, description and tags, then each video is added to the queue">✨ Generate &amp; queue all</button>
+      <button class="ghost" id="bulkGo" disabled>Add to queue</button>
+      <span class="kbd" id="bulkNote"></span>
+    </div>
+    <p class="fineprint" style="margin-top:8px"><b>Generate &amp; queue all</b> runs in the background: you can close this window, and progress shows at the top of the Download tab.</p>
   </div>
 </dialog>
 
@@ -1264,6 +1284,9 @@ let downloads = [], picked = new Set();
 const DL_FILTERS = [["all", "All"], ["new", "Not queued"], ["queued", "Queued"], ["posted", "Posted"], ["skipped", "Skipped"]];
 let dlFilter = store.get("dlFilter", "all");
 function dlBadge(f) {
+  const auto = autoState ? autoFor(f.name) : f.auto;
+  if (auto === "waiting") return `<span class="dl-st queued">✨ Waiting for the AI</span>`;
+  if (auto) return `<span class="dl-st queued">✨ Writing title…</span>`;
   if (f.status === "queued") {
     const st = f.queue && f.queue.state;
     if (st === "error") return `<span class="dl-st queued error" title="Queued, but the post failed: see the Queue tab">Queued · needs attention</span>`;
@@ -1649,7 +1672,7 @@ document.addEventListener("change", (e) => {
 function renderBulk() {
   $("#bulkList").innerHTML = bulkItems.map((b, i) => {
     const locked = b.state !== "ready";
-    return `<div class="bulk-row ${b.state}" data-bi="${i}">
+    return `<div class="bulk-row ${b.state}${b.autoErr ? " error" : ""}" data-bi="${i}">
       <input type="text" class="bt" value="${escapeHtml(b.title)}" placeholder="Title" maxlength="100" ${locked ? "disabled" : ""}>
       <input type="text" class="cr bc" value="${escapeHtml(b.creator)}" placeholder="@creator" ${locked ? "disabled" : ""}>
       <span class="rowbtns">
@@ -1665,16 +1688,20 @@ function renderBulk() {
   const ready = bulkItems.filter(b => b.state === "ready").length;
   $("#bulkGo").disabled = bulkBusy || !ready || bulkItems.some(b => b.ai === "running")
     || bulkItems.some(b => b.state === "ready" && !b.title.trim() && selected().includes("youtube"));
-  $("#bulkGo").textContent = bulkBusy ? "Adding…" : `Add ${ready} to queue`;
+  $("#bulkGo").textContent = bulkBusy ? "Adding…" : `Add ${ready} to queue as they are`;
+  $("#bulkAuto").disabled = bulkBusy || !ready || bulkItems.some(b => b.ai === "running");
+  $("#bulkAuto").textContent = `✨ Generate & queue ${ready ? ready + " " : ""}${ready === 1 ? "video" : "videos"}`;
 }
 $("#bulkList").addEventListener("input", (e) => {
   const row = e.target.closest("[data-bi]"); if (!row) return;
   const b = bulkItems[+row.dataset.bi];
-  if (e.target.classList.contains("bt")) b.title = e.target.value;
+  if (e.target.classList.contains("bt")) { b.title = e.target.value; b.titleEdited = true; }
   if (e.target.classList.contains("bc")) b.creator = e.target.value;
   if (e.target.classList.contains("btg")) b.tags = e.target.value;
   $("#bulkGo").disabled = bulkBusy || !bulkItems.some(x => x.state === "ready");
 });
+$("#bulkAiDesc").checked = store.get("bulkAiDesc", true);
+$("#bulkAiDesc").onchange = () => store.set("bulkAiDesc", $("#bulkAiDesc").checked);
 $("#bulkList").addEventListener("click", (e) => {
   const rm = e.target.closest("[data-brm]"), ai = e.target.closest("[data-bai]");
   if (rm) { bulkItems.splice(+rm.closest("[data-bi]").dataset.bi, 1); renderBulk(); }
@@ -1727,6 +1754,105 @@ $("#bulkGo").onclick = async () => {
   }
   bulkBusy = false; renderBulk(); loadQueue(); loadDownloads();
   toast(ok ? `Added ${ok} video${ok > 1 ? "s" : ""} to the queue` : "Nothing was added", !ok);
+};
+
+/* ---------- auto-queue: AI writes titles + descriptions, then everything is queued (on the server) ---------- */
+let autoState = null, autoTimer = null, autoSig = "";
+function bulkKey(b) { return b.dl ? "dl:" + b.dl : b.src.staged ? "st:" + b.src.staged : null; }
+function baseFields() {  // the Upload tab's settings (platforms, preset, captions, options), minus per-video fields
+  const skip = ["local_file", "staged", "video", "title", "description", "tags", "creator", "link", "when_mode", "when_ts", "ig_thumb"];
+  return [...buildForm({ serverName: "-" }, { title: "", mode: "daily" }).entries()].filter(([k]) => !skip.includes(k));
+}
+$("#bulkAuto").onclick = async () => {
+  const todo = bulkItems.filter(b => b.state === "ready");
+  if (!todo.length) return toast("Add some videos first.", true);
+  if (todo.some(b => b.ai !== "done") && needAiKey()) return;
+  bulkBusy = true; renderBulk();
+  for (const b of todo.filter(b => !b.dl && !b.src.staged)) {  // videos from the PC are sent to the app first
+    b.msg = "Sending video…"; renderBulk();
+    try { b.src.staged = (await stageFile(b.src, pct => { b.msg = `Sending video… ${pct}%`; renderBulk(); })).token; }
+    catch (err) { b.state = "error"; b.msg = err.message; }
+  }
+  const send = todo.filter(b => b.state === "ready");
+  try {
+    if (!send.length) throw new Error("Nothing to send.");
+    const st = await api("/api/autoqueue", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        items: send.map(b => ({ local_file: b.dl || "", staged: b.dl ? "" : b.src.staged, name: b.name,
+          creator: b.creator, link: b.link, tags: b.tags, title: b.title, title_locked: !!(b.titleEdited || b.ai === "done"),
+          ai: b.ai === "done" ? { title: b.title, description: b.aiDesc || "", tags: [] } : null })),
+        base: baseFields(), description: $("#bulkDesc").value, tags: $("#bulkTags").value,
+        ai_description: $("#bulkAiDesc").checked }) });
+    send.forEach(b => { b.state = "auto"; b.key = bulkKey(b); b.msg = "✨ Waiting for the AI…"; });
+    toast(`Working on ${send.length}. It keeps going in the background, so you can close this window.`);
+    applyAuto(st); watchAuto();
+  } catch (err) { toast(err.message, true); }
+  bulkBusy = false; renderBulk();
+};
+
+function autoFor(name) {
+  if (!autoState) return null;
+  const i = autoState.items.find(x => x.local_file === name && ["waiting", "ai", "queueing"].includes(x.state));
+  return i ? i.state : null;
+}
+function applyAuto(st) {
+  autoState = st;
+  const byKey = Object.fromEntries(st.items.map(i => [i.key, i]));
+  let rows = false;
+  for (const b of bulkItems) {
+    const i = b.state === "auto" && byKey[b.key]; if (!i) continue;
+    if (i.title) b.title = i.title;
+    b.autoErr = i.state === "error" || i.state === "stopped";
+    b.msg = i.state === "queued" ? `Queued for ${fmtWhen(i.when)}` : i.state === "stopped" ? "Stopped"
+      : i.state === "error" ? i.message : `✨ ${i.message}…`;
+    if (i.state === "queued") b.state = "done";
+    rows = true;
+  }
+  if (rows && $("#bulk").open) renderBulk();
+  renderAutoBanner();
+  const sig = `${st.queued}|${st.failed}|${st.stopped}|${st.left}|${st.running}`;
+  if (sig !== autoSig) {
+    const first = !autoSig; autoSig = sig;
+    if (!first) { loadQueue(); if (!$("#downloadView").hidden) loadDownloads(); }
+    else if (downloads.length) renderDownloads();
+  } else if (!$("#downloadView").hidden && downloads.length) renderDownloads();
+}
+function watchAuto() {
+  if (autoTimer) return;
+  autoTimer = setInterval(async () => {
+    const st = await api("/api/autoqueue").catch(() => null); if (!st) return;
+    applyAuto(st);
+    if (!st.running) { clearInterval(autoTimer); autoTimer = null; }
+  }, 2000);
+}
+function renderAutoBanner() {
+  const st = autoState, el = $("#autoBanner");
+  if (!st || !st.total) { el.hidden = true; return; }
+  el.hidden = false;
+  const finished = st.queued + st.failed + st.stopped, pct = Math.round(100 * finished / st.total);
+  const now = st.items.filter(i => i.state === "ai" || i.state === "queueing");
+  const extra = [st.failed ? `<span class="bad">${st.failed} failed</span>` : "", st.stopped ? `${st.stopped} stopped` : ""].filter(Boolean).join(" · ");
+  const fails = st.items.filter(i => i.state === "error");
+  el.innerHTML = `
+    <div class="top">
+      <span class="grow">${st.running ? "✨ Writing titles and queueing" : "✨ Finished"}: <b>${st.queued} of ${st.total}</b> queued${extra ? " · " + extra : ""}</span>
+      ${st.running ? `<button class="small-btn" data-auto="stop" title="Finish the ones in progress, skip the rest">Stop</button>` : ""}
+      ${st.failed || st.stopped ? `<button class="small-btn" data-auto="retry">Retry ${st.failed + st.stopped}</button>` : ""}
+      ${!st.running ? `<button class="small-btn" data-auto="clear">Dismiss</button>` : ""}
+    </div>
+    ${st.running ? `<div class="bar"><i style="width:${pct}%"></i></div>` : ""}
+    ${now.map(i => `<div class="now">${escapeHtml(i.name)}: ${escapeHtml(i.message)}…</div>`).join("")}
+    ${fails.length ? `<details ${fails.length <= 3 ? "open" : ""}><summary>Why ${fails.length === 1 ? "one" : fails.length} failed</summary>
+      ${fails.map(i => `<div class="fail"><b>${escapeHtml(i.name)}</b>: ${escapeHtml(i.message)}</div>`).join("")}</details>` : ""}`;
+}
+$("#autoBanner").onclick = async (e) => {
+  const b = e.target.closest("[data-auto]"); if (!b) return;
+  b.disabled = true;
+  try {
+    const st = await api("/api/autoqueue/" + b.dataset.auto, { method: "POST" });
+    if (b.dataset.auto === "retry") bulkItems.forEach(x => { if (x.autoErr) { x.autoErr = false; x.state = "auto"; } });
+    autoSig = ""; applyAuto(st); if (st.running) watchAuto();
+  } catch (err) { toast(err.message, true); b.disabled = false; }
 };
 
 /* ---------- app version & updates ---------- */
@@ -1913,6 +2039,7 @@ $("#importFile").onchange = async () => {
   try { applyStatus(await api("/api/status")); } catch (e) { toast(e.message, true); }
   if (!location.hash && !Object.values(state.platforms).some(p => p.connected)) $("#settings").showModal();
   loadHistory(); loadApp();
+  api("/api/autoqueue").then(st => { applyAuto(st); if (st.running) watchAuto(); }).catch(() => {});
 })();
 </script>
 </body>

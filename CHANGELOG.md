@@ -1,5 +1,11 @@
 # What's new
 
+## 1.9.0
+- ✨ Generate & queue: in Bulk add, one click has the AI write every video's title, caption and tags, then adds each one to the queue. It runs in the background, so you can close the window; progress shows at the top of the Download tab, with Stop and Retry.
+- Each video's AI caption goes at the start of its description by default, followed by your "Description for all".
+- Downloads show "Writing title…" while the AI is on them.
+- The app won't restart for an update while a batch is running.
+
 ## 1.8.0
 - Downloads now show where each video stands: Not queued, Queued (with its post time), Posted or Skipped. Queueing a video and posting it update this by themselves, and videos you'd already queued or posted are picked up too.
 - Filter the Downloads list by status, e.g. "Not queued" to see what's left to queue. "Select all" picks everything in the current view.

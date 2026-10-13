@@ -119,6 +119,7 @@ Click **✨ Summarize video** on the Upload tab and Google's Gemini AI watches t
 ## Several videos at once
 
 - **Download several links:** paste multiple links into the Download tab (separated by spaces or new lines). When they're done, click **Queue these N…**. You can also tick videos in *Downloaded videos* and click **Queue selected**.
+- **Queue a whole batch with AI in one go:** in the Download tab, click **Not queued**, tick **Select all**, then **Queue selected**. Fill in **Description for all** / **Tags for all** if you want, then click **✨ Generate & queue**. For each video the AI writes a title, a caption and tags, and it's added to your next open post time. It runs in the background: you can close the window, and progress shows at the top of the Download tab (with **Stop** and **Retry** for any that failed). Needs a Gemini key (Settings → AI summaries).
 - **Bulk add** has its own **Description for all** and **Tags for all**. Click **✨ Generate titles & tags** to write a title and tags for every video. Tick **Start each description with its AI caption** if you want each video's own one-liner above the shared description. Then **Add N to queue**, and they fill your next post times.
 
 ## Auto-fix format
