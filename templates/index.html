@@ -295,6 +295,22 @@
   .dl-pick label { display: flex; gap: 8px; align-items: center; font-size: 14px; padding: 4px 0; }
   .dl-pick label span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .file-row .fn .cr { color: var(--accent); }
+
+  /* download status */
+  .dl-st { display: inline-block; font-size: 11.5px; font-weight: 600; padding: 1px 8px; border-radius: 99px; margin-right: 6px;
+           border: 1px solid currentColor; line-height: 1.5; vertical-align: 1px; }
+  .dl-st.new { color: var(--warn); }
+  .dl-st.queued { color: var(--accent); }
+  .dl-st.queued.error { color: var(--err); }
+  .dl-st.posted { color: var(--ok); }
+  .dl-st.skipped { color: var(--muted); }
+  .dl-filter { display: flex; gap: 6px; flex-wrap: wrap; margin: 4px 0 8px; }
+  .dl-filter .chip { font-size: 12.5px; padding: 3px 10px; }
+  .dl-filter .chip.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .dl-filter .chip b { font-weight: 600; opacity: .75; margin-left: 3px; }
+  .dl-sel { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; padding: 8px 0; font-size: 13px; color: var(--muted); }
+  .dl-sel .grow { flex: 1; }
+  .dl-pick .dl-st { margin: 0; flex: none; }
 </style>
 </head>
 <body>
@@ -483,8 +499,18 @@
   <section class="card">
     <div class="files-head">
       <h2>Downloaded videos</h2>
-      <button class="small-btn" id="queueSelected" hidden>Queue selected</button>
       <button class="small-btn" id="openFolder">Open folder</button>
+    </div>
+    <div class="dl-filter" id="dlFilter"></div>
+    <div class="dl-sel">
+      <label style="display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" id="dlPickAll"> <span id="dlPickAllText">Select all</span></label>
+      <span class="grow"></span>
+      <span id="dlSelActs" hidden style="display:contents">
+        <button class="small-btn" id="queueSelected">Queue selected</button>
+        <button class="small-btn" data-mark="posted" title="Already posted somewhere: don't count it as waiting">Mark posted</button>
+        <button class="small-btn" data-mark="skip" title="Not going to post these">Skip</button>
+        <button class="small-btn" data-mark="" title="Back to Not queued">Clear mark</button>
+      </span>
     </div>
     <div id="dlFiles"><div class="empty">Nothing yet.</div></div>
     <p class="fineprint">Re-uploading someone else's video can get your accounts copyright strikes. Use this for your own videos and clips you have the rights to edit.</p>
@@ -1235,28 +1261,77 @@ $("#dlBrowser").onchange = () => store.set("dlBrowser", $("#dlBrowser").value);
 $("#openFolder").onclick = () => api("/api/downloads/open-folder", { method: "POST" }).catch(e => toast(e.message, true));
 
 let downloads = [], picked = new Set();
+const DL_FILTERS = [["all", "All"], ["new", "Not queued"], ["queued", "Queued"], ["posted", "Posted"], ["skipped", "Skipped"]];
+let dlFilter = store.get("dlFilter", "all");
+function dlBadge(f) {
+  if (f.status === "queued") {
+    const st = f.queue && f.queue.state;
+    if (st === "error") return `<span class="dl-st queued error" title="Queued, but the post failed: see the Queue tab">Queued · needs attention</span>`;
+    if (st === "running") return `<span class="dl-st queued">Posting now</span>`;
+    return `<span class="dl-st queued" title="In the queue">Queued · ${escapeHtml(fmtWhen(f.queue.when))}</span>`;
+  }
+  if (f.status === "posted") return `<span class="dl-st posted">Posted</span>`;
+  if (f.status === "skipped") return `<span class="dl-st skipped">Skipped</span>`;
+  return `<span class="dl-st new">Not queued</span>`;
+}
+function shownDownloads() { return dlFilter === "all" ? downloads : downloads.filter(f => f.status === dlFilter); }
 function updatePicked() {
-  const n = picked.size;
-  $("#queueSelected").hidden = !n; $("#queueSelected").textContent = `Queue selected (${n})`;
+  const n = picked.size, shown = shownDownloads();
+  $("#dlSelActs").hidden = !n;
+  $("#queueSelected").textContent = `Queue selected (${n})`;
+  const all = shown.length && shown.every(f => picked.has(f.name));
+  $("#dlPickAll").checked = !!all;
+  $("#dlPickAll").indeterminate = !all && shown.some(f => picked.has(f.name));
+  $("#dlPickAllText").textContent = n ? `${n} selected` : "Select all";
 }
 $("#dlFiles").addEventListener("change", (e) => {
   const cb = e.target.closest("[data-pick]"); if (!cb) return;
   cb.checked ? picked.add(cb.dataset.pick) : picked.delete(cb.dataset.pick); updatePicked();
 });
+$("#dlPickAll").onchange = () => {
+  const shown = shownDownloads();
+  if ($("#dlPickAll").checked) shown.forEach(f => picked.add(f.name)); else shown.forEach(f => picked.delete(f.name));
+  renderDownloads();
+};
+$("#dlFilter").onclick = (e) => {
+  const b = e.target.closest("[data-filter]"); if (!b) return;
+  dlFilter = b.dataset.filter; store.set("dlFilter", dlFilter);
+  picked.clear(); renderDownloads();
+};
+document.querySelectorAll("[data-mark]").forEach(b => b.onclick = async () => {
+  const names = [...picked]; if (!names.length) return;
+  try {
+    downloads = await api("/api/downloads/mark", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ names, mark: b.dataset.mark || null }) });
+    picked.clear(); renderDownloads();
+    const queued = downloads.filter(f => names.includes(f.name) && f.status === "queued").length;
+    if (queued) toast(`${queued} of those ${queued === 1 ? "is" : "are"} still in the queue, so ${queued === 1 ? "it stays" : "they stay"} Queued.`);
+  } catch (err) { toast(err.message, true); }
+});
 $("#queueSelected").onclick = () => { const names = [...picked]; picked.clear(); updatePicked(); loadDownloads(); openBulk(names); };
 async function loadDownloads() {
   downloads = await api("/api/downloads").catch(() => []);
-  picked = new Set([...picked].filter(n => downloads.some(d => d.name === n))); updatePicked();
-  $("#dlFiles").innerHTML = downloads.length ? downloads.map(f => `
+  renderDownloads();
+}
+function renderDownloads() {
+  picked = new Set([...picked].filter(n => downloads.some(d => d.name === n)));
+  const count = k => k === "all" ? downloads.length : downloads.filter(f => f.status === k).length;
+  if (!DL_FILTERS.some(([k]) => k === dlFilter)) dlFilter = "all";
+  $("#dlFilter").innerHTML = DL_FILTERS.map(([k, label]) =>
+    `<button class="chip ${k === dlFilter ? "on" : ""}" data-filter="${k}">${label}<b>${count(k)}</b></button>`).join("");
+  const shown = shownDownloads();
+  $("#dlFiles").innerHTML = shown.length ? shown.map(f => `
     <div class="file-row">
       <input type="checkbox" class="pick" data-pick="${escapeHtml(f.name)}" ${picked.has(f.name) ? "checked" : ""} aria-label="Select">
       <div class="fn"><div title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</div>
-        <div>${f.creator ? `<span class="cr">${escapeHtml(f.creator)}</span> · ` : ""}${fmtSize(f.size)} · ${new Date(f.time * 1000).toLocaleString()}</div></div>
+        <div>${dlBadge(f)}${f.creator ? `<span class="cr">${escapeHtml(f.creator)}</span> · ` : ""}${fmtSize(f.size)} · ${new Date(f.time * 1000).toLocaleString()}</div></div>
       <div class="acts">
         <button class="small-btn" data-use="${escapeHtml(f.name)}">Use in uploader</button>
         <button class="small-btn" data-del="${escapeHtml(f.name)}" title="Delete file">🗑</button>
       </div>
-    </div>`).join("") : `<div class="empty">Nothing yet. Paste a link above.</div>`;
+    </div>`).join("")
+    : downloads.length ? `<div class="empty">No videos here.</div>` : `<div class="empty">Nothing yet. Paste a link above.</div>`;
+  updatePicked();
 }
 
 document.addEventListener("click", async (e) => {
@@ -1540,9 +1615,11 @@ async function openBulk(preselect = []) {
     const f = downloads.find(d => d.name === name);
     if (f && !bulkItems.some(b => b.dl === f.name)) bulkItems.push(bulkFromDownload(f));
   }
-  $("#bulkDl").innerHTML = downloads.length ? downloads.map((f, i) => `<label>
-      <input type="checkbox" data-bdl="${i}" ${bulkItems.some(b => b.dl === f.name) ? "checked" : ""}>
-      <span>${escapeHtml(f.name)}${f.creator ? " · " + escapeHtml(f.creator) : ""}</span></label>`).join("")
+  const order = { new: 0, skipped: 1, posted: 2, queued: 3 };
+  const sorted = downloads.slice().sort((a, b) => (order[a.status] ?? 0) - (order[b.status] ?? 0) || b.time - a.time);
+  $("#bulkDl").innerHTML = sorted.length ? sorted.map(f => `<label>
+      <input type="checkbox" data-bdl="${escapeHtml(f.name)}" ${bulkItems.some(b => b.dl === f.name) ? "checked" : ""}>
+      ${dlBadge(f)}<span>${escapeHtml(f.name)}${f.creator ? " · " + escapeHtml(f.creator) : ""}</span></label>`).join("")
     : `<div class="empty">No downloads yet.</div>`;
   $("#bulkNote").textContent = `Platforms: ${selected().map(p => NAMES[p]).join(", ")}`;
   renderBulk(); $("#bulk").showModal();
@@ -1562,7 +1639,8 @@ function addBulkFile(f) {
 }
 document.addEventListener("change", (e) => {
   const cb = e.target.closest("[data-bdl]"); if (!cb) return;
-  const f = downloads[+cb.dataset.bdl];
+  const f = downloads.find(d => d.name === cb.dataset.bdl);
+  if (!f) return;
   if (cb.checked) bulkItems.push(bulkFromDownload(f));
   else bulkItems = bulkItems.filter(b => !(b.dl === f.name && b.state === "ready"));
   renderBulk();
@@ -1647,7 +1725,7 @@ $("#bulkGo").onclick = async () => {
     } catch (err) { b.state = "error"; b.msg = err.message; }
     renderBulk();
   }
-  bulkBusy = false; renderBulk(); loadQueue();
+  bulkBusy = false; renderBulk(); loadQueue(); loadDownloads();
   toast(ok ? `Added ${ok} video${ok > 1 ? "s" : ""} to the queue` : "Nothing was added", !ok);
 };
 

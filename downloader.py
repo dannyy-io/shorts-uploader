@@ -262,17 +262,52 @@ def _creator_handle(entry, parent):
 
 
 def _save_meta(name, entry, parent, url):
+    parent = parent or {}
     meta = {
-        "creator": _creator_handle(entry, parent or {}),
+        "creator": _creator_handle(entry, parent),
         "link": entry.get("webpage_url") or parent.get("webpage_url") or url,
         "source_title": entry.get("title") or parent.get("title") or "",
         "site": entry.get("extractor_key") or parent.get("extractor_key") or "",
     }
+    _write_meta(name, meta)
+
+
+def _write_meta(name, data):
     try:
         with open(os.path.join(META_DIR, name + ".json"), "w", encoding="utf-8") as f:
-            json.dump(meta, f, indent=2)
+            json.dump(data, f, indent=2)
     except OSError:
         pass
+
+
+_meta_lock = threading.Lock()
+
+
+def update_meta(name, **values):
+    """Change some fields of a download's info file (None removes a field)."""
+    if not safe_path(name):
+        return False
+    with _meta_lock:
+        data = meta(name)
+        for k, v in values.items():
+            if v is None:
+                data.pop(k, None)
+            else:
+                data[k] = v
+        _write_meta(name, data)
+    return True
+
+
+MARKS = ("posted", "skip")  # set by hand in the Downloads tab
+
+
+def set_mark(name, mark):
+    return update_meta(name, mark=mark if mark in MARKS else None)
+
+
+def mark_posted(name):
+    """Remember that this download went out (it then shows as Posted)."""
+    return update_meta(name, posted_at=time.time())
 
 
 def meta(name):
@@ -307,7 +342,7 @@ def safe_path(name):
     return path
 
 
-def list_files(limit=40):
+def list_files(limit=500):
     items = []
     for name in os.listdir(DOWNLOAD_DIR):
         path = os.path.join(DOWNLOAD_DIR, name)
@@ -316,7 +351,9 @@ def list_files(limit=40):
             m = meta(name)
             items.append({"name": name, "size": st.st_size, "time": st.st_mtime,
                           "creator": m.get("creator", ""), "link": m.get("link", ""),
-                          "source_title": m.get("source_title", "")})
+                          "source_title": m.get("source_title", ""),
+                          "mark": m.get("mark") if m.get("mark") in MARKS else None,
+                          "posted_at": m.get("posted_at"), "cleared_at": m.get("cleared_at")})
     items.sort(key=lambda x: x["time"], reverse=True)
     return items[:limit]
 

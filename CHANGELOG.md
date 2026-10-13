@@ -1,5 +1,11 @@
 # What's new
 
+## 1.8.0
+- Downloads now show where each video stands: Not queued, Queued (with its post time), Posted or Skipped. Queueing a video and posting it update this by themselves, and videos you'd already queued or posted are picked up too.
+- Filter the Downloads list by status, e.g. "Not queued" to see what's left to queue. "Select all" picks everything in the current view.
+- Tick videos to Mark posted, Skip, or Clear mark.
+- Downloads list shows all your videos, not just the newest 40.
+
 ## 1.7.1
 - AI summaries work with Google's new "AQ." API keys: the app tries each way Google accepts a key and remembers the one that works.
 - When Gemini rejects a key, Settings now shows Google's exact reason, plus what to do about it.

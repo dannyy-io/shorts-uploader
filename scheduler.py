@@ -22,6 +22,7 @@ os.makedirs(QUEUE_DIR, exist_ok=True)
 CHECK_EVERY = 15  # seconds
 _lock = threading.RLock()
 _runner = None  # set by app.py: runner(item) -> {platform: result}
+on_posted = None  # set by app.py: on_posted(item), called after a post goes out
 _wake = threading.Event()
 _prep_queue = _queue.Queue()
 
@@ -96,7 +97,7 @@ def next_daily_slot(now=None):
     raise ValueError("Queue is full")
 
 
-def add(src_path, move, filename, title, texts, platforms, opts, when, fix=None):
+def add(src_path, move, filename, title, texts, platforms, opts, when, fix=None, source=None):
     item_id = uuid.uuid4().hex[:12]
     dest = os.path.join(QUEUE_DIR, f"{item_id}_{secure_filename(filename) or 'video.mp4'}")
     (shutil.move if move else shutil.copy2)(src_path, dest)
@@ -116,6 +117,7 @@ def add(src_path, move, filename, title, texts, platforms, opts, when, fix=None)
         "results": {},
         "job_id": None,
         "created": time.time(),
+        "source_download": source,  # name in the Downloads folder it came from, if any
     }
     with _lock:
         lst = items()
@@ -262,12 +264,16 @@ def _process(item_id):
         results = {p: {"state": "error", "message": f"Unexpected error: {e}", "url": None}
                    for p in remaining_platforms(item)}
 
+    posted = []
+
     def fn(it, lst):
         it["results"].update(results)
         it["job_id"] = None
         all_done = all(it["results"].get(p, {}).get("state") == "done" for p in it["platforms"])
         it["status"] = "done" if all_done else "error"
         it["finished"] = time.time()
+        if any(r.get("state") == "done" for r in it["results"].values()):
+            posted.append(dict(it))
         if all_done:
             try:
                 os.remove(it["file"])
@@ -275,6 +281,11 @@ def _process(item_id):
                 pass
             lst.remove(it)  # finished posts live on in upload history
     _edit(item_id, fn)
+    if posted and on_posted:
+        try:
+            on_posted(posted[0])
+        except Exception as e:
+            print("Couldn't record the post:", e, file=sys.stderr)
 
 
 def _loop():

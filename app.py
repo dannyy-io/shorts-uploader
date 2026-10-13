@@ -465,10 +465,12 @@ def api_upload():
             return jsonify(error=str(e) or "Pick a valid time."), 400
         # Downloaded files are copied (you keep the original); fresh uploads are moved into the queue.
         item = scheduler.add(path, move=not local_path, filename=filename, title=title, texts=texts,
-                             platforms=selected, opts=opts, when=when, fix=fix if fix["enabled"] else None)
+                             platforms=selected, opts=opts, when=when, fix=fix if fix["enabled"] else None,
+                             source=local_name or None)
         return jsonify(scheduled=item)
 
     job = _new_job(job_id, filename, title, selected)
+    job["source_download"] = local_name or None
     if fix["enabled"]:
         job["prepare"] = {"state": "queued", "progress": 0, "message": "Checking video format"}
     threading.Thread(target=_run_job, args=(job, path, texts, opts, not local_path),
@@ -559,6 +561,8 @@ def _run_job(job, path, texts, opts, delete_after=True, fix=None):
                     for p, e in job["platforms"].items()},
     })
     storage.save("history", history[:50])
+    if job.get("source_download") and any(e["state"] == "done" for e in job["platforms"].values()):
+        downloader.mark_posted(job["source_download"])
 
 
 @app.get("/api/jobs/<job_id>")
@@ -605,16 +609,72 @@ def api_download_job(job_id):
     return jsonify(job)
 
 
+def _queue_source(item):
+    """Which download a queued post came from (posts queued before 1.8.0 only have the file name)."""
+    if "source_download" in item:
+        return item["source_download"]
+    return item.get("filename") if downloader.safe_path(item.get("filename", "")) else None
+
+
+def _on_posted(item):
+    name = _queue_source(item)
+    if name:
+        downloader.mark_posted(name)
+
+
+def _downloads_with_status():
+    """Each download plus where it stands: new, queued, posted or skipped."""
+    queued = {}
+    for item in scheduler.items():
+        name = _queue_source(item)
+        if name and item["status"] != "done":
+            queued.setdefault(name, item)
+    last_posted = {}  # file name -> when it last went out, from upload history
+    for h in storage.load("history", default=[]):
+        if any(r.get("state") == "done" for r in (h.get("results") or {}).values()):
+            last_posted[h.get("file")] = max(last_posted.get(h.get("file"), 0), h.get("time") or 0)
+    files = downloader.list_files()
+    for f in files:
+        q = queued.get(f["name"])
+        cleared = f.pop("cleared_at", None) or 0  # "Clear mark" forgets posts from before it
+        posted = max(f.pop("posted_at", None) or 0, last_posted.get(f["name"], 0))
+        if q:
+            f["status"] = "queued"
+            f["queue"] = {"when": q["when"], "state": q["status"]}
+        elif f["mark"] == "posted" or posted > cleared:
+            f["status"] = "posted"
+        elif f["mark"] == "skip":
+            f["status"] = "skipped"
+        else:
+            f["status"] = "new"
+    return files
+
+
 @app.get("/api/downloads")
 def api_downloads():
-    return jsonify(downloader.list_files())
+    return jsonify(_downloads_with_status())
+
+
+@app.post("/api/downloads/mark")
+def api_downloads_mark():
+    """Mark downloads by hand: "posted", "skip", or null to clear the mark."""
+    body = request.get_json(force=True) or {}
+    mark = body.get("mark")
+    if mark not in (*downloader.MARKS, None):
+        return jsonify(error="Unknown mark."), 400
+    names = [n for n in body.get("names") or [] if isinstance(n, str)]
+    for name in names[:1000]:
+        downloader.set_mark(name, mark)
+        if mark is None:
+            downloader.update_meta(name, cleared_at=time.time())
+    return jsonify(_downloads_with_status())
 
 
 @app.post("/api/downloads/delete")
 def api_downloads_delete():
     if not downloader.delete((request.get_json(force=True) or {}).get("name", "")):
         abort(404)
-    return jsonify(downloader.list_files())
+    return jsonify(_downloads_with_status())
 
 
 @app.post("/api/downloads/open-folder")
@@ -984,6 +1044,7 @@ if __name__ == "__main__":
             winapp.open_window(BASE_URL)
         sys.exit(0)
     _cleanup_leftovers()
+    scheduler.on_posted = _on_posted
     scheduler.start(_run_scheduled)
     if LAUNCHED:
         threading.Thread(target=_update_loop, daemon=True, name="updates").start()
