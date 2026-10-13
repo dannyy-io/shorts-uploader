@@ -36,7 +36,9 @@ _sem = threading.Semaphore(2)  # at most 2 summaries at once (free-tier rate lim
 
 
 class SummaryError(Exception):
-    pass
+    def __init__(self, msg, temporary=False):
+        super().__init__(msg)
+        self.temporary = temporary  # Google was busy/overloaded: worth trying again later
 
 
 # ---------- settings ----------
@@ -134,7 +136,8 @@ def _err(resp, key=""):
     if resp.status_code == 429:
         return "Gemini's free-tier limit was hit. Wait a minute and try again (bulk runs slow down automatically)."
     if resp.status_code >= 500:
-        return "Gemini is having trouble right now. Try again in a bit. " + google
+        return ("Gemini is overloaded right now (Google's side, not your key). The app retried and tried other "
+                "models; try again in a few minutes. " + google)
     text = f"{msg} {reason}".lower()
     if "service_disabled" in text or "has not been used in project" in text or "is disabled" in text:
         return ("The Gemini (\"Generative Language\") API is turned off in that key's Google Cloud project. "
@@ -203,9 +206,24 @@ def pick_model(key, force=False):
         candidates.append(((not lite), _version(name), (not preview), (not dated), name))
     if not candidates:
         raise SummaryError("No Gemini Flash model is available for this key.")
-    best = max(candidates)[-1]
-    _model_cache.update(key=key, model=best, at=time.time())
-    return best
+    ranked = [c[-1] for c in sorted(candidates, reverse=True)]
+    # backups for when the best one is overloaded: other versions first, then lite (one of each version)
+    backups, seen = [], {(_version(ranked[0]), "lite" in ranked[0])}
+    for name in ranked[1:]:
+        kind = (_version(name), "lite" in name)
+        if kind not in seen and "preview" not in name and "exp" not in name:
+            seen.add(kind)
+            backups.append(name)
+    _model_cache.update(key=key, model=ranked[0], backups=backups[:3], at=time.time())
+    return ranked[0]
+
+
+def model_chain(key):
+    """The model to use, then backups to switch to if it's overloaded (none if you picked a model yourself)."""
+    first = pick_model(key)
+    if settings()["model"]:
+        return [first]
+    return [first] + [m for m in _model_cache.get("backups", []) if m != first]
 
 
 def _ffmpeg():
@@ -369,19 +387,10 @@ def summarize(path, hint="", source=None, report=lambda msg: None, use_cache=Tru
                 "generationConfig": {"responseMimeType": "application/json", "responseSchema": SCHEMA,
                                      "temperature": 0.7},
             }
-            for attempt in range(3):
-                r = requests.post(f"{API}/v1beta/models/{model}:generateContent", json=body, timeout=180,
-                                  **_auth(s["key"]))
-                if r.status_code == 429 and attempt < 2:
-                    report("Rate-limited by Gemini, waiting a moment")
-                    time.sleep(20 * (attempt + 1))
-                    continue
-                if r.status_code == 404 and not s["model"] and attempt < 2:
-                    model = pick_model(s["key"], force=True)  # model retired since we cached it
-                    continue
-                break
+            r = _generate(s, model, body, report)
+            model = r.model_used
             if not r.ok:
-                raise SummaryError(_err(r, s["key"]))
+                raise SummaryError(_err(r, s["key"]), temporary=r.status_code == 429 or r.status_code >= 500)
             data = r.json()
             cand = (data.get("candidates") or [{}])[0]
             text = "".join(p.get("text", "") for p in (cand.get("content") or {}).get("parts", []))
@@ -390,7 +399,7 @@ def summarize(path, hint="", source=None, report=lambda msg: None, use_cache=Tru
                 raise SummaryError(f"Gemini didn't describe this video ({reason}).")
             raw = _parse(text)
         except requests.RequestException as e:
-            raise SummaryError(f"Couldn't reach Gemini ({type(e).__name__}).")
+            raise SummaryError(f"Couldn't reach Gemini ({type(e).__name__}).", temporary=True)
         finally:
             if uploaded:
                 _delete_file(s["key"], uploaded)
@@ -419,6 +428,52 @@ def summarize(path, hint="", source=None, report=lambda msg: None, use_cache=Tru
             cache.pop(k, None)
     storage.save(CACHE_FILE, cache)
     return result
+
+
+BUSY_WAITS = (8, 20, 40)  # seconds to wait before retrying the same model when Google is overloaded
+
+
+def _generate(s, model, body, report):
+    """generateContent with patience: waits out rate limits and overload, and switches to a backup model
+    if one stays overloaded. Returns the last response (with .model_used set)."""
+    chain = model_chain(s["key"])
+    chain = [model] + [m for m in chain if m != model]
+    i, tries, refreshed = 0, 0, False
+    while True:
+        model = chain[i]
+        try:
+            r = requests.post(f"{API}/v1beta/models/{model}:generateContent", json=body, timeout=180, **_auth(s["key"]))
+        except (requests.ConnectionError, requests.Timeout):
+            r = None
+        r_status = r.status_code if r is not None else 503
+        if r is not None:
+            r.model_used = model
+        if r is not None and r.ok:
+            return r
+        if r_status == 404 and not s["model"] and not refreshed:  # model retired since we cached it
+            refreshed = True
+            chain = model_chain_refresh(s["key"])
+            i, tries = 0, 0
+            continue
+        if r_status == 429 or r_status >= 500:
+            if tries < len(BUSY_WAITS) - (1 if i + 1 < len(chain) else 0):
+                wait = BUSY_WAITS[tries] if r_status != 429 else 20 * (tries + 1)
+                report(f"Gemini is busy, trying again in {wait}s")
+                time.sleep(wait)
+                tries += 1
+                continue
+            if i + 1 < len(chain):
+                i, tries = i + 1, 0
+                report(f"Gemini is busy, switching to {chain[i]}")
+                continue
+        if r is None:
+            raise requests.ConnectionError("no response")
+        return r
+
+
+def model_chain_refresh(key):
+    pick_model(key, force=True)
+    return model_chain(key)
 
 
 # ---------- background jobs ----------

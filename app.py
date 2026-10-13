@@ -961,6 +961,8 @@ def api_summarize_job(job_id):
 # ---------- auto-queue: AI writes each title + description, then it's queued (runs in the background) ----------
 
 AUTO_WORKERS = 2  # the summarizer only runs 2 at once anyway (free-tier rate limits)
+AUTO_RETRIES = 3  # when Gemini is overloaded, a video goes back in line this many times
+AUTO_RETRY_AFTER = 60  # seconds before it's tried again
 AUTO_ACTIVE = ("waiting", "ai", "queueing")
 _FORM_ONLY = {"local_file", "staged", "video", "title", "description", "tags", "creator", "link",
               "when_mode", "when_ts", "ig_thumb"}
@@ -1020,15 +1022,25 @@ def _auto_worker():
                 for i in _auto["items"]:
                     if i["state"] == "waiting":
                         i.update(state="stopped", message="Stopped")
-            it = next((i for i in _auto["items"] if i["state"] == "waiting"), None)
-            if not it:
+            waiting = [i for i in _auto["items"] if i["state"] == "waiting"]
+            it = next((i for i in waiting if i.get("retry_at", 0) <= time.time()), None)
+            if not waiting:
                 _auto["workers"] -= 1
                 return
-            it.update(state="ai", message="Starting")
+            if it:
+                it.update(state="ai", message="Starting")
+        if not it:  # only ones waiting to retry later are left
+            time.sleep(2)
+            continue
         try:
             _auto_one(it)
         except summarizer.SummaryError as e:
-            it.update(state="error", message=str(e))
+            it["tries"] = it.get("tries", 0) + 1
+            if e.temporary and it["tries"] <= AUTO_RETRIES and not _auto["stop"]:
+                it.update(state="waiting", retry_at=time.time() + AUTO_RETRY_AFTER * it["tries"],
+                          message=f"Gemini is busy, will try again in {AUTO_RETRY_AFTER * it['tries'] // 60} min")
+            else:
+                it.update(state="error", message=str(e))
         except ValueError as e:
             it.update(state="error", message=str(e))
         except Exception as e:  # keep going with the rest
@@ -1091,7 +1103,7 @@ def api_autoqueue_stop():
     """Don't start any more (ones the AI is already on still finish)."""
     with _auto_lock:
         _auto["stop"] = True
-        for i in _auto["items"]:
+        for i in _auto["items"]:  # (also ones waiting to retry later)
             if i["state"] == "waiting":
                 i.update(state="stopped", message="Stopped")
     return jsonify(_auto_status())
@@ -1103,7 +1115,7 @@ def api_autoqueue_retry():
     with _auto_lock:
         for i in _auto["items"]:
             if i["state"] in ("error", "stopped"):
-                i.update(state="waiting", message="Waiting")
+                i.update(state="waiting", message="Waiting", retry_at=0, tries=0)
         if any(i["state"] == "waiting" for i in _auto["items"]):
             _auto_kick()
     return jsonify(_auto_status())

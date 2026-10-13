@@ -1,5 +1,9 @@
 # What's new
 
+## 1.9.1
+- When Gemini is overloaded ("503 UNAVAILABLE / high demand"), the app now waits and retries, then switches to another Gemini model instead of failing.
+- Generate & queue: a video that still hits a busy Gemini goes back in line and is tried again 1, 2 and 3 minutes later before it counts as failed.
+
 ## 1.9.0
 - ✨ Generate & queue: in Bulk add, one click has the AI write every video's title, caption and tags, then adds each one to the queue. It runs in the background, so you can close the window; progress shows at the top of the Download tab, with Stop and Retry.
 - Each video's AI caption goes at the start of its description by default, followed by your "Description for all".
