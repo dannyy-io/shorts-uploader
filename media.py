@@ -12,6 +12,9 @@ import subprocess
 
 TARGET_W, TARGET_H = 1080, 1920
 ASPECT = TARGET_W / TARGET_H
+FONT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "fonts", "Inter-Black.otf")
+HOOK_STYLES = ("outline", "box")
+HOOK_POSITIONS = ("top", "middle")
 
 
 class MediaError(Exception):
@@ -88,6 +91,9 @@ def plan(info, path, fix):
     if info["fps"] > 60.5:
         reasons.append("frame rate capped at 60")
         encode = True
+    if hook_settings(fix):
+        reasons.append("hook text added")
+        encode = True
     trim = float(fix.get("trim") or 0)
     if trim and info["duration"] > trim + 0.5:
         reasons.append(f"trimmed to {int(trim // 60)}:{int(trim % 60):02d}")
@@ -99,7 +105,25 @@ def plan(info, path, fix):
     return None, []
 
 
-def _filter(info, fit):
+def output_size(info):
+    """Width and height the converted video will have."""
+    w, h = info["width"], info["height"]
+    if not (w and h) or abs(w / h - ASPECT) > 0.01 or h > TARGET_H:
+        return TARGET_W, TARGET_H
+    return w // 2 * 2, h // 2 * 2
+
+
+def _filter(info, fit, hook=None):
+    """ffmpeg filter graph ending in [v]. With hook, input 1 is the hook text image to lay on top."""
+    base = _base_filter(info, fit)
+    if not hook:
+        return base
+    secs = float(hook.get("secs") or 0)
+    enable = f":enable='lte(t,{secs:g})'" if secs else ""
+    return base[:-3] + "[base];[base][1:v]overlay=0:0:format=auto" + enable + "[v]"
+
+
+def _base_filter(info, fit):
     w, h = info["width"], info["height"]
     tail = ",fps=60" if info["fps"] > 60.5 else ""
     if w and h and abs(w / h - ASPECT) > 0.01:
@@ -136,10 +160,17 @@ def convert(src, dst, fix, report=lambda pct, msg: None):
             raise MediaError("Couldn't repackage the video: " + res.stderr.strip().splitlines()[-1][:200])
         return dst, reasons
 
+    hook = hook_settings(fix)
+    hook_png = None
     args = [exe, "-hide_banner", "-y", "-i", src]
+    if hook:
+        hook_png = os.path.splitext(dst)[0] + "_hook.png"
+        ow, oh = output_size(info)
+        render_hook(hook["text"], ow, oh, hook["style"], hook["pos"]).save(hook_png)
+        args += ["-i", hook_png]
     if trim and info["duration"] > trim:
         args += ["-t", str(trim)]
-    args += ["-filter_complex", _filter(info, fix.get("fit", "blur")),
+    args += ["-filter_complex", _filter(info, fix.get("fit", "blur"), hook),
              "-map", "[v]", "-map", "0:a:0?",
              "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-profile:v", "high",
              "-pix_fmt", "yuv420p",
@@ -169,8 +200,100 @@ def convert(src, dst, fix, report=lambda pct, msg: None):
                 report(min(99.0, 100 * secs / total), "Converting video")
     proc.wait()
     t.join(timeout=5)
+    if hook_png:
+        try:
+            os.remove(hook_png)
+        except OSError:
+            pass
     if proc.returncode != 0:
         msg = next((ln.strip() for ln in reversed(tail) if ln.strip()), "unknown error")
         raise MediaError("Couldn't convert the video: " + msg[:200])
     report(100, "Video ready")
     return dst, reasons
+
+
+# ---------- hook text: big caption on top of the video ----------
+
+_EMOJI = re.compile("[\U0001F000-\U0001FAFF\U00002600-\U000027BF\U0001F1E6-\U0001F1FF\uFE0F\u200D\u20E3"
+                    "\U0001F3FB-\U0001F3FF\U0000E000-\U0000F8FF\U000E0000-\U000E007F]")
+
+
+def clean_hook(text):
+    """One tidy line of hook text (no emoji: the font can't draw them), max 120 characters."""
+    text = _EMOJI.sub("", str(text or ""))
+    text = re.sub(r"[ \t]+", " ", text.replace("\r", "")).strip()
+    lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
+    return "\n".join(lines)[:120].strip()
+
+
+def hook_settings(fix):
+    """The hook part of auto-fix settings, cleaned up, or None if there's no hook text."""
+    hook = (fix or {}).get("hook") or {}
+    text = clean_hook(hook.get("text"))
+    if not text:
+        return None
+    secs = float(hook.get("secs") or 0)
+    return {"text": text,
+            "style": hook.get("style") if hook.get("style") in HOOK_STYLES else "outline",
+            "pos": hook.get("pos") if hook.get("pos") in HOOK_POSITIONS else "top",
+            "secs": secs if 0 < secs <= 60 else 0}
+
+
+def _wrap(draw, font, text, max_w):
+    lines = []
+    for para in text.split("\n"):
+        cur = ""
+        for word in para.split(" "):
+            test = f"{cur} {word}".strip()
+            if draw.textlength(test, font=font) <= max_w or not cur:
+                cur = test
+            else:
+                lines.append(cur)
+                cur = word
+        lines.append(cur)
+    return lines
+
+
+def render_hook(text, width=TARGET_W, height=TARGET_H, style="outline", pos="top"):
+    """A transparent image the size of the video with the hook text drawn on it (Pillow)."""
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+    except ImportError:
+        raise MediaError("Hook text needs the Pillow package. Restart the app so it can install it.")
+    if not os.path.exists(FONT):
+        raise MediaError("The hook text font is missing. Reinstall the app.")
+    text = clean_hook(text)
+    img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    if not text:
+        return img
+    draw = ImageDraw.Draw(img)
+    unit = width / TARGET_W
+    max_w = int(width * 0.84)
+    # biggest size where it fits in 3 lines (long words shrink it further)
+    for size in range(int(96 * unit), int(40 * unit) - 1, -int(4 * unit) or -1):
+        font = ImageFont.truetype(FONT, size)
+        lines = _wrap(draw, font, text, max_w)
+        if len(lines) <= 3 and all(draw.textlength(ln, font=font) <= max_w for ln in lines):
+            break
+    lines = lines[:4]
+    line_h = int(size * 1.18)
+    block_h = line_h * len(lines)
+    top = int(height * 0.14) if pos == "top" else (height - block_h) // 2
+    if style == "box":
+        pad_x, pad_y = int(size * 0.38), int(size * 0.16)
+        for i, ln in enumerate(lines):
+            lw = draw.textlength(ln, font=font)
+            x0, y0 = (width - lw) / 2 - pad_x, top + i * line_h - pad_y
+            draw.rounded_rectangle([x0, y0, x0 + lw + 2 * pad_x, y0 + line_h + pad_y * 0.6],
+                                   radius=int(size * 0.22), fill=(255, 255, 255, 255))
+        for i, ln in enumerate(lines):
+            draw.text((width / 2, top + i * line_h + line_h / 2), ln, font=font, anchor="mm", fill=(0, 0, 0, 255))
+    else:
+        stroke = max(3, int(size * 0.11))
+        for i, ln in enumerate(lines):
+            xy = (width / 2, top + i * line_h + line_h / 2)
+            draw.text((xy[0] + 0, xy[1] + int(size * 0.05)), ln, font=font, anchor="mm", fill=(0, 0, 0, 110),
+                      stroke_width=stroke, stroke_fill=(0, 0, 0, 110))  # soft drop shadow
+            draw.text(xy, ln, font=font, anchor="mm", fill=(255, 255, 255, 255),
+                      stroke_width=stroke, stroke_fill=(0, 0, 0, 255))
+    return img

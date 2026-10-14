@@ -292,11 +292,12 @@ SCHEMA = {
         "summary": {"type": "STRING"},
         "titles": {"type": "ARRAY", "items": {"type": "STRING"}},
         "description": {"type": "STRING"},
+        "hook": {"type": "STRING"},
         "tags_post": {"type": "ARRAY", "items": {"type": "STRING"}},
         "tags_niche": {"type": "ARRAY", "items": {"type": "STRING"}},
         "tags_broad": {"type": "ARRAY", "items": {"type": "STRING"}},
     },
-    "required": ["summary", "titles", "description", "tags_post", "tags_niche", "tags_broad"],
+    "required": ["summary", "titles", "description", "hook", "tags_post", "tags_niche", "tags_broad"],
 }
 
 
@@ -308,6 +309,13 @@ def _prompt(hint, source, niche, language):
         "- titles: 3 short, catchy title options (max 70 characters each, no hashtags, no ALL CAPS, "
         "nothing the video doesn't deliver).",
         "- description: a 1-2 sentence caption for the post (no hashtags).",
+        "- hook: on-screen text shown big at the top of the video to make people keep watching, 3-8 words, "
+        "in casual internet style (e.g. 'wait for his reaction', 'he did NOT expect that'). It must fit what "
+        "happens and not spoil the payoff. No emojis, no hashtags, no quotes around it.",
+        "Emojis: in the titles and the description, add emojis where they bring out the emotion or vibe of the "
+        "video (funny, shocking, wholesome, hype, sad...). You decide which ones and where; usually 1-2 in a title "
+        "and 1-3 in the description, placed naturally (often at the end of a phrase). Leave them out of a title "
+        "or caption if they'd feel forced. Never put emojis in the hook or the tags.",
         "- tags_post: 4-6 post-specific tags that say exactly what this video is "
         "(e.g. for a bicep workout: bicep workout, bicep curl, best bicep exercise).",
         "- tags_niche: 3-5 tags for the channel's niche/category.",
@@ -326,10 +334,16 @@ def _prompt(hint, source, niche, language):
     return "\n".join(lines)
 
 
+def _clean_hook(text):
+    import media
+    return media.clean_hook(str(text).strip().strip('"').strip("'"))[:80]
+
+
 def _clean_tags(items, limit):
     out, seen = [], set()
     for t in items or []:
-        t = re.sub(r"[#<>\"]", "", str(t)).strip().lower()
+        import media
+        t = re.sub(r"[#<>\"]", "", media._EMOJI.sub("", str(t))).strip().lower()
         t = re.sub(r"\s+", " ", t)[:60]
         if t and t not in seen:
             seen.add(t)
@@ -362,7 +376,7 @@ def summarize(path, hint="", source=None, report=lambda msg: None, use_cache=Tru
     if not s["key"]:
         raise SummaryError("Add a Gemini API key in Settings → AI summaries first (it's free).")
     source = source or {}
-    ck = _cache_key(path) + hashlib.sha256(f"{hint}|{s['niche']}|{s['language']}".encode()).hexdigest()[:8]
+    ck = _cache_key(path) + hashlib.sha256(f"v2|{hint}|{s['niche']}|{s['language']}".encode()).hexdigest()[:8]
     cache = storage.load(CACHE_FILE)
     if use_cache and ck in cache:
         return cache[ck]
@@ -413,6 +427,7 @@ def summarize(path, hint="", source=None, report=lambda msg: None, use_cache=Tru
         "summary": str(raw.get("summary", "")).strip(),
         "titles": [str(t).strip().strip('"')[:100] for t in raw.get("titles", []) if str(t).strip()][:3],
         "description": str(raw.get("description", "")).strip(),
+        "hook": _clean_hook(raw.get("hook", "")),
         "tags": {
             "post": _clean_tags(raw.get("tags_post"), 6),
             "niche": _clean_tags(niche_fixed + list(raw.get("tags_niche") or []), 5),

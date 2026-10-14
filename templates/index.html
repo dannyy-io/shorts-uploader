@@ -227,6 +227,13 @@
   .fix-opts select { font-size: 13px; padding: 6px 8px; max-width: 100%; }
   .fix-opts label { display: inline-flex; gap: 6px; align-items: center; }
   .fixhint { font-size: 12.5px; color: var(--muted); }
+  .hookbox { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); font-size: 14px; display: grid; gap: 8px; }
+  .hookbox .hk-head { font-weight: 600; }
+  .hookbox .hk-head em { display: block; font-style: normal; font-weight: 400; font-size: 12.5px; color: var(--muted); }
+  .hookbox input[type=text] { font-size: 15px; }
+  #drop .hook-prev { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 2; }
+  .bulk-row .bh { grid-column: 1 / -1; font-size: 13px; padding: 6px 9px; }
+  .ai-card .hook-line { font-weight: 700; }
   .credit { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); display: grid; gap: 8px; }
   .credit .field { margin: 0; }
   .credit input { padding: 8px 10px; font-size: 14px; }
@@ -360,6 +367,26 @@
           <label><input type="checkbox" id="trim"> Trim to 3:00</label>
         </div>
         <div class="fixhint" id="fixHint"></div>
+      </div>
+      <div class="hookbox">
+        <div class="hk-head">Hook text <em>big text on the video that makes people keep watching</em></div>
+        <input type="text" id="hookText" maxlength="120" autocomplete="off" placeholder="e.g. wait for his reaction (leave empty for none)">
+        <div class="fix-opts">
+          <select id="hookStyle" aria-label="Hook style">
+            <option value="outline">White text, black outline</option>
+            <option value="box">Black text on white boxes</option>
+          </select>
+          <select id="hookPos" aria-label="Hook position">
+            <option value="top">At the top</option>
+            <option value="middle">In the middle</option>
+          </select>
+          <select id="hookSecs" aria-label="Show hook for">
+            <option value="0">For the whole video</option>
+            <option value="3">For the first 3 seconds</option>
+            <option value="5">For the first 5 seconds</option>
+          </select>
+        </div>
+        <div class="fixhint">Shown on the preview above. Adding a hook re-encodes the video, so it takes a little longer.</div>
       </div>
       <div class="credit" id="creditBox" hidden>
         <label class="field"><span>Original creator</span><input type="text" id="creator" placeholder="@handle" autocomplete="off"></label>
@@ -664,7 +691,7 @@
 <dialog id="bulk">
   <div class="dlg-head"><h2>Bulk add to queue</h2><button class="icon-btn" id="closeBulk">Close</button></div>
   <div class="dlg-body">
-    <p class="fineprint">Each video gets the next open post time, starting <b id="bulkStart">…</b>. Platforms, preset, per-platform captions and auto-fix come from the Upload tab.</p>
+    <p class="fineprint">Each video gets the next open post time, starting <b id="bulkStart">…</b>. Platforms, preset, per-platform captions, auto-fix and the hook style come from the Upload tab.</p>
     <label class="field"><span>Description for all</span><textarea id="bulkDesc" placeholder="Same description on every video"></textarea></label>
     <label class="field"><span>Tags for all <em class="count">added to each video's own tags</em></span><input type="text" id="bulkTags" autocomplete="off" placeholder="e.g. anime, amv, shorts"></label>
     <div class="row">
@@ -676,6 +703,7 @@
     <div class="bulk-opts">
       <button class="ghost" type="button" id="bulkAi">✨ Generate titles &amp; tags</button>
       <label><input type="checkbox" id="bulkAiDesc" checked> Start each description with its AI caption</label>
+      <label><input type="checkbox" id="bulkAiHook" checked> Put AI hook text on each video</label>
     </div>
     <div id="bulkList"></div>
     <div class="row" style="flex-wrap:wrap">
@@ -798,20 +826,20 @@ document.addEventListener("drop", (e) => {
 
 function setFile(f) {
   if (!/\.(mp4|mov|m4v|webm)$/i.test(f.name)) return toast("Use an MP4, MOV or WebM file.", true);
-  file = f; meta = null; coverMs = null; $("#creator").value = ""; $("#link").value = ""; hideAi();
+  file = f; meta = null; coverMs = null; $("#creator").value = ""; $("#link").value = ""; hideAi(); $("#hookText").value = "";
   const url = URL.createObjectURL(f);
   drop.innerHTML = ""; const v = document.createElement("video");
   v.src = url; v.controls = true; v.muted = true; v.playsInline = true; v.preload = "metadata";
   v.onclick = (e) => e.stopPropagation();
   v.onloadedmetadata = () => { meta = { d: v.duration, w: v.videoWidth, h: v.videoHeight }; showInfo(); };
   v.onerror = () => { meta = { noPreview: true }; showInfo(); };
-  drop.append(v);
+  drop.append(v); updateHookPreview();
   if (!$("#title").value.trim()) $("#title").value = f.name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim().slice(0, 100);
   showInfo(); refreshUI();
 }
 
 function resetFile() {
-  file = null; meta = null; input.value = ""; coverMs = null; hideAi(); $("#tags").value = ""; $("#aiHint").value = "";
+  file = null; meta = null; input.value = ""; coverMs = null; hideAi(); $("#tags").value = ""; $("#aiHint").value = ""; $("#hookText").value = "";
   $("#creator").value = ""; $("#link").value = ""; $("#trim").checked = false;
   ["youtube", "instagram", "tiktok"].forEach(p => $("#desc_" + p).value = "");
   drop.innerHTML = `<div class="hint"><b>Drop a video here</b>or click to choose<br><small>MP4, MOV or WebM · vertical 9:16</small></div>`;
@@ -819,14 +847,14 @@ function resetFile() {
 }
 
 function setServerFile(item) {
-  file = { name: item.name, size: item.size, serverName: item.name }; meta = null; coverMs = null; hideAi();
+  file = { name: item.name, size: item.size, serverName: item.name }; meta = null; coverMs = null; hideAi(); $("#hookText").value = "";
   $("#creator").value = item.creator || ""; $("#link").value = item.link || "";
   drop.innerHTML = ""; const v = document.createElement("video");
   v.src = "/files/" + encodeURIComponent(item.name); v.controls = true; v.muted = true; v.playsInline = true; v.preload = "metadata";
   v.onclick = (e) => e.stopPropagation();
   v.onloadedmetadata = () => { meta = { d: v.duration, w: v.videoWidth, h: v.videoHeight }; showInfo(); };
   v.onerror = () => { meta = { noPreview: true }; showInfo(); };
-  drop.append(v);
+  drop.append(v); updateHookPreview();
   if (!$("#title").value.trim()) $("#title").value = titleFromName(item.name);
   showInfo(); refreshUI();
 }
@@ -882,6 +910,24 @@ $("#fix").addEventListener("change", updateFixHint);
 $("#fit").addEventListener("change", updateFixHint);
 $("#trim").addEventListener("change", updateFixHint);
 
+/* ---------- hook text ---------- */
+function cut(text, n) { return Array.from(text || "").slice(0, n).join(""); }  // never splits an emoji in half
+function hookOpts() { return { style: $("#hookStyle").value, pos: $("#hookPos").value, secs: $("#hookSecs").value }; }
+let hookTimer = null;
+function updateHookPreview() {
+  clearTimeout(hookTimer);
+  hookTimer = setTimeout(() => {
+    let img = drop.querySelector(".hook-prev");
+    const text = $("#hookText").value.trim();
+    if (!file || !text) { if (img) img.remove(); return; }
+    if (!img) { img = document.createElement("img"); img.className = "hook-prev"; img.alt = ""; drop.append(img); }
+    const o = hookOpts();
+    img.src = "/api/hook.png?" + new URLSearchParams({ text, style: o.style, pos: o.pos });
+  }, 250);
+}
+$("#hookText").addEventListener("input", updateHookPreview);
+["#hookStyle", "#hookPos", "#hookSecs"].forEach(id => $(id).addEventListener("change", () => { updateHookPreview(); saveForm(); }));
+
 /* ---------- Instagram cover ---------- */
 let coverMs = null;
 function updateCover() {
@@ -898,7 +944,8 @@ $("#setCover").onclick = () => {
 };
 
 /* ---------- form ---------- */
-const FIELDS = ["yt_privacy", "yt_shorts_tag", "yt_notify", "yt_kids", "ig_feed", "tt_mode", "tt_no_comments", "fix", "fit", "preset", "tagsToCaptions"];
+const FIELDS = ["yt_privacy", "yt_shorts_tag", "yt_notify", "yt_kids", "ig_feed", "tt_mode", "tt_no_comments", "fix", "fit", "preset", "tagsToCaptions",
+                "hookStyle", "hookPos", "hookSecs"];
 function restoreToggles() {
   const saved = store.get("toggles", {});
   $$("[data-toggle]").forEach(t => { if (!t.disabled) t.checked = saved[t.dataset.toggle] ?? true; });
@@ -1089,6 +1136,9 @@ function buildForm(src, o) {
   fd.append("creator", o.creator || ""); fd.append("link", o.link || "");
   fd.append("fix", $("#fix").checked ? "1" : "0"); fd.append("fit", $("#fit").value);
   fd.append("trim", o.trim ? "1" : "0");
+  const ho = hookOpts();
+  fd.append("hook_text", o.hook ?? $("#hookText").value); fd.append("hook_style", ho.style);
+  fd.append("hook_pos", ho.pos); fd.append("hook_secs", ho.secs);
   if (o.cover !== null && o.cover !== undefined) fd.append("ig_thumb", String(o.cover));
   fd.append("yt_privacy", $("#yt_privacy").value);
   fd.append("yt_shorts_tag", $("#yt_shorts_tag").checked ? "1" : "0");
@@ -1589,6 +1639,8 @@ function renderAiCard(r) {
     <div><div class="lbl">Summary</div><div class="sum">${escapeHtml(r.summary)}</div></div>
     <div><div class="lbl">Title ideas · click one to use it</div>
       <div class="chips">${r.titles.map((t, i) => `<button type="button" class="chip" data-ai-title="${i}">${escapeHtml(t)}</button>`).join("")}</div></div>
+    ${r.hook ? `<div><div class="lbl">Hook text</div><div class="hook-line">${escapeHtml(r.hook)}</div>
+      <div class="acts" style="margin-top:6px"><button type="button" class="small-btn" data-ai-hook>Use as hook</button></div></div>` : ""}
     <div><div class="lbl">Description</div><div>${escapeHtml(r.description)}</div>
       <div class="acts" style="margin-top:6px"><button type="button" class="small-btn" data-ai-desc="use">Use</button>
         <button type="button" class="small-btn" data-ai-desc="add">Add to mine</button></div></div>
@@ -1603,7 +1655,8 @@ function renderAiCard(r) {
 $("#aiCard").addEventListener("click", (e) => {
   if (!aiResult) return;
   const t = e.target.closest("[data-ai-title]"), d = e.target.closest("[data-ai-desc]"), g = e.target.closest("[data-ai-tags]");
-  if (t) { $("#title").value = aiResult.titles[+t.dataset.aiTitle].slice(0, 100); }
+  if (e.target.closest("[data-ai-hook]")) { $("#hookText").value = aiResult.hook; updateHookPreview(); toast("Hook set: see the preview"); return; }
+  if (t) { $("#title").value = cut(aiResult.titles[+t.dataset.aiTitle], 100); }
   if (d) { $("#desc").value = d.dataset.aiDesc === "use" ? aiResult.description : [$("#desc").value.trim(), aiResult.description].filter(Boolean).join("\n\n"); }
   if (g) { $("#tags").value = g.dataset.aiTags === "use" ? allTags(aiResult).join(", ") : mergeTags($("#tags").value, allTags(aiResult)); }
   if (t || d || g) { refreshUI(); saveForm(); toast(t ? "Title set" : d ? "Description updated" : "Tags updated"); }
@@ -1679,6 +1732,7 @@ function renderBulk() {
         <button class="small-btn" data-bai title="Generate a title and tags for this one" ${locked || b.ai === "running" ? "disabled" : ""}>✨</button>
         <button class="small-btn" data-brm title="Remove" ${b.state === "sending" ? "disabled" : ""}>✕</button>
       </span>
+      <input type="text" class="bh" value="${escapeHtml(b.hook || "")}" maxlength="120" placeholder="Hook text on the video (empty = none${$("#bulkAiHook").checked ? ", or the AI writes one" : ""})" ${locked ? "disabled" : ""}>
       <input type="text" class="btg" value="${escapeHtml(b.tags || "")}" placeholder="Tags for this video (comma-separated)" ${locked ? "disabled" : ""}>
       ${b.summary ? `<div class="sum">${escapeHtml(b.summary)}</div>` : ""}
       <div class="src">${escapeHtml(b.name)} · ${fmtSize(b.size)}</div>
@@ -1698,10 +1752,13 @@ $("#bulkList").addEventListener("input", (e) => {
   if (e.target.classList.contains("bt")) { b.title = e.target.value; b.titleEdited = true; }
   if (e.target.classList.contains("bc")) b.creator = e.target.value;
   if (e.target.classList.contains("btg")) b.tags = e.target.value;
+  if (e.target.classList.contains("bh")) { b.hook = e.target.value; b.hookEdited = true; }
   $("#bulkGo").disabled = bulkBusy || !bulkItems.some(x => x.state === "ready");
 });
 $("#bulkAiDesc").checked = store.get("bulkAiDesc", true);
 $("#bulkAiDesc").onchange = () => store.set("bulkAiDesc", $("#bulkAiDesc").checked);
+$("#bulkAiHook").checked = store.get("bulkAiHook", true);
+$("#bulkAiHook").onchange = () => { store.set("bulkAiHook", $("#bulkAiHook").checked); renderBulk(); };
 $("#bulkList").addEventListener("click", (e) => {
   const rm = e.target.closest("[data-brm]"), ai = e.target.closest("[data-bai]");
   if (rm) { bulkItems.splice(+rm.closest("[data-bi]").dataset.bi, 1); renderBulk(); }
@@ -1717,7 +1774,8 @@ async function bulkSummarize(items) {
       b.ai = "running"; b.msg = "✨ Starting…"; renderBulk();
       try {
         const r = await summarizeSrc(b.src, b.creator ? `Originally by ${b.creator}` : "", (m) => { b.msg = "✨ " + m; renderBulk(); });
-        b.title = (r.titles[0] || b.title).slice(0, 100);
+        if (!b.titleEdited) b.title = cut(r.titles[0] || b.title, 100);
+        if (!b.hookEdited && $("#bulkAiHook").checked) b.hook = r.hook || "";
         b.tags = mergeTags(b.tags, allTags(r));
         b.summary = r.summary; b.aiDesc = r.description; b.ai = "done"; b.msg = ""; ok++;
       } catch (err) { b.ai = "error"; b.msg = err.message; }
@@ -1744,7 +1802,7 @@ $("#bulkGo").onclick = async () => {
     b.state = "sending"; b.msg = "Sending…"; renderBulk();
     try {
       const desc = [$("#bulkAiDesc").checked ? (b.aiDesc || "") : "", $("#bulkDesc").value.trim()].filter(Boolean).join("\n\n");
-      const body = await sendForm(buildForm(b.src, { title: b.title, creator: b.creator, link: b.link, mode: "daily",
+      const body = await sendForm(buildForm(b.src, { title: b.title, creator: b.creator, link: b.link, mode: "daily", hook: b.hook || "",
           description: desc, tags: mergeTags(b.tags, splitTags($("#bulkTags").value)) }),
         (pct) => { b.msg = b.src.staged || b.src.serverName ? "Adding…" : `Sending… ${pct}%`; renderBulk(); });
       b.state = "done"; ok++;
@@ -1760,7 +1818,7 @@ $("#bulkGo").onclick = async () => {
 let autoState = null, autoTimer = null, autoSig = "";
 function bulkKey(b) { return b.dl ? "dl:" + b.dl : b.src.staged ? "st:" + b.src.staged : null; }
 function baseFields() {  // the Upload tab's settings (platforms, preset, captions, options), minus per-video fields
-  const skip = ["local_file", "staged", "video", "title", "description", "tags", "creator", "link", "when_mode", "when_ts", "ig_thumb"];
+  const skip = ["local_file", "staged", "video", "title", "description", "tags", "creator", "link", "when_mode", "when_ts", "ig_thumb", "hook_text"];
   return [...buildForm({ serverName: "-" }, { title: "", mode: "daily" }).entries()].filter(([k]) => !skip.includes(k));
 }
 $("#bulkAuto").onclick = async () => {
@@ -1780,9 +1838,10 @@ $("#bulkAuto").onclick = async () => {
       body: JSON.stringify({
         items: send.map(b => ({ local_file: b.dl || "", staged: b.dl ? "" : b.src.staged, name: b.name,
           creator: b.creator, link: b.link, tags: b.tags, title: b.title, title_locked: !!(b.titleEdited || b.ai === "done"),
-          ai: b.ai === "done" ? { title: b.title, description: b.aiDesc || "", tags: [] } : null })),
+          hook: b.hook || "", hook_locked: !!(b.hookEdited || b.ai === "done"),
+          ai: b.ai === "done" ? { title: b.title, description: b.aiDesc || "", hook: b.hook || "", tags: [] } : null })),
         base: baseFields(), description: $("#bulkDesc").value, tags: $("#bulkTags").value,
-        ai_description: $("#bulkAiDesc").checked }) });
+        ai_description: $("#bulkAiDesc").checked, ai_hook: $("#bulkAiHook").checked }) });
     send.forEach(b => { b.state = "auto"; b.key = bulkKey(b); b.msg = "✨ Waiting for the AI…"; });
     toast(`Working on ${send.length}. It keeps going in the background, so you can close this window.`);
     applyAuto(st); watchAuto();

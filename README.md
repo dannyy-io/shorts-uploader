@@ -116,6 +116,15 @@ Click **✨ Summarize video** on the Upload tab and Google's Gemini AI watches t
 
 **Tags:** YouTube gets them in its Tags field (up to its 500-character limit). Instagram and TikTok don't have a tags field, so tick **Also add them as hashtags** to put the best few at the end of the caption (3 on YouTube, up to 8 on Instagram and TikTok).
 
+## Hook text
+
+**Hook text** (Upload tab, under Auto-fix) puts big text on the video, like *wait for his reaction*, so people keep watching. Pick the look (white text with a black outline, or black text on white boxes), where it goes (top or middle), and how long it shows (whole video, or the first 3 or 5 seconds). The preview shows exactly how it'll look.
+
+- **✨ Summarize video** suggests a hook too: click **Use as hook**.
+- In **Bulk add**, tick **Put AI hook text on each video** and the AI writes one per video (you can edit any of them first). The look comes from the Upload tab.
+- Hooks can't contain emojis (the font can't draw them), so they're left out. Adding a hook re-encodes the video, which takes a little longer.
+- The AI also puts fitting emojis in titles and captions when they suit the video.
+
 ## Several videos at once
 
 - **Download several links:** paste multiple links into the Download tab (separated by spaces or new lines). When they're done, click **Queue these N…**. You can also tick videos in *Downloaded videos* and click **Queue selected**.

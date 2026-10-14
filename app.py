@@ -426,6 +426,12 @@ def _submit_post(form, video=None):
         "fit": "crop" if form.get("fit") == "crop" else "blur",
         "trim": 180 if form.get("trim") == "1" else 0,
     }
+    hook = media.hook_settings({"hook": {"text": form.get("hook_text", ""), "style": form.get("hook_style"),
+                                         "pos": form.get("hook_pos"), "secs": form.get("hook_secs") or 0}})
+    if hook:
+        if not media.available():
+            return dict(error="Hook text needs ffmpeg, which isn't installed yet. Restart the app to install it."), 400
+        fix.update(enabled=True, hook=hook)  # drawing text on the video always needs a conversion
 
     job_id = uuid.uuid4().hex[:12]
     if local_path:
@@ -958,6 +964,21 @@ def api_summarize_job(job_id):
     return jsonify(job)
 
 
+@app.get("/api/hook.png")
+def api_hook_png():
+    """The hook text exactly as it will be drawn on the video (for the preview on the Upload tab)."""
+    a = request.args
+    try:
+        img = media.render_hook(a.get("text", ""), 540, 960, a.get("style", "outline"), a.get("pos", "top"))
+    except media.MediaError as e:
+        return jsonify(error=str(e)), 400
+    import io
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    buf.seek(0)
+    return send_file(buf, mimetype="image/png", max_age=3600)
+
+
 # ---------- auto-queue: AI writes each title + description, then it's queued (runs in the background) ----------
 
 AUTO_WORKERS = 2  # the summarizer only runs 2 at once anyway (free-tier rate limits)
@@ -965,7 +986,7 @@ AUTO_RETRIES = 3  # when Gemini is overloaded, a video goes back in line this ma
 AUTO_RETRY_AFTER = 60  # seconds before it's tried again
 AUTO_ACTIVE = ("waiting", "ai", "queueing")
 _FORM_ONLY = {"local_file", "staged", "video", "title", "description", "tags", "creator", "link",
-              "when_mode", "when_ts", "ig_thumb"}
+              "when_mode", "when_ts", "ig_thumb", "hook_text"}
 _auto = {"items": [], "workers": 0, "stop": False}
 _auto_lock = threading.Lock()
 
@@ -996,7 +1017,7 @@ def _auto_one(it):
         source = downloader.meta(it["local_file"]) if it["local_file"] else {}
         hint = f"Originally by {it['creator']}" if it["creator"] else ""
         r = summarizer.summarize(path, hint=hint, source=source, report=lambda m: it.update(message=m))
-        ai = {"title": (r["titles"] or [""])[0], "description": r["description"],
+        ai = {"title": (r["titles"] or [""])[0], "description": r["description"], "hook": r.get("hook", ""),
               "tags": r["tags"]["post"] + r["tags"]["niche"] + r["tags"]["broad"]}
     shared = it["shared"]
     title = (it["title"] or ai.get("title") or title_from_name(it["name"])).strip()[:100]
@@ -1007,6 +1028,9 @@ def _auto_one(it):
                                  ("link", it["link"]), ("when_mode", "daily")]
     if it["creator"]:
         fields.append(("creator", it["creator"]))
+    hook = it["hook"] if it["hook_locked"] else (ai.get("hook", "") if shared["ai_hook"] else "")
+    if hook:
+        fields.append(("hook_text", hook))
     fields.append(("local_file", it["local_file"]) if it["local_file"] else ("staged", it["staged"]))
     it.update(state="queueing", message="Adding to the queue", title=title)
     body, code = _submit_post(MultiDict(fields))
@@ -1070,7 +1094,7 @@ def api_autoqueue():
     if not any(k == "platforms" and v in PLATFORMS for k, v in base):
         return jsonify(error="Turn on at least one platform on the Upload tab first."), 400
     shared = {"description": str(body.get("description") or ""), "tags": str(body.get("tags") or ""),
-              "ai_desc": bool(body.get("ai_description", True))}
+              "ai_desc": bool(body.get("ai_description", True)), "ai_hook": bool(body.get("ai_hook", False))}
     new = []
     for raw in (body.get("items") or [])[:500]:
         local, staged = str(raw.get("local_file") or ""), str(raw.get("staged") or "")
@@ -1084,6 +1108,7 @@ def api_autoqueue():
             "name": str(raw.get("name") or local or "video")[:200], "creator": str(raw.get("creator") or "")[:100],
             "link": str(raw.get("link") or "")[:500], "tags": str(raw.get("tags") or "")[:1000],
             "title": str(raw.get("title") or "")[:100] if raw.get("title_locked") else "", "ai": ai,
+            "hook": str(raw.get("hook") or "")[:120], "hook_locked": bool(raw.get("hook_locked")),
             "base": base, "shared": shared, "state": "waiting", "message": "Waiting", "when": None,
         })
     if not new:
