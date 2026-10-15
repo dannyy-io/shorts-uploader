@@ -445,6 +445,74 @@ def summarize(path, hint="", source=None, report=lambda msg: None, use_cache=Tru
     return result
 
 
+# ---------- tailoring captions per platform (text only, no video) ----------
+
+PLATFORM_GUIDE = {
+    "youtube": ("YouTube Shorts", "a title (max 90 characters) and a description. Calls to action say subscribe / "
+                "like / comment; viewers are 'subscribers'."),
+    "instagram": ("Instagram Reels", "a short hook line (used as the first line of the caption, max 90 characters) "
+                  "and the rest of the caption. Calls to action say follow / save / share / send to a friend / "
+                  "tag someone; viewers are 'followers'; never say subscribe."),
+    "tiktok": ("TikTok", "a short hook line (first line of the caption, max 90 characters) and the rest of the "
+               "caption. Calls to action say follow / like / share / comment; viewers are 'followers'; never say "
+               "subscribe."),
+}
+
+
+def tailor(title, description, platforms, report=lambda msg: None):
+    """Rewrite one post's title + description for each platform: the right words for that platform
+    (subscribe vs follow...) and slightly different wording on each, same meaning.
+    Returns {platform: {"title", "description"}}."""
+    s = settings()
+    if not s["key"]:
+        raise SummaryError("Add a Gemini API key in Settings → AI summaries first (it's free).")
+    platforms = [p for p in platforms if p in PLATFORM_GUIDE]
+    if not platforms:
+        return {}
+    lines = [
+        "A creator is posting the same short video to several platforms. Rewrite its text for each platform below.",
+        "Keep the meaning, the vibe and the emojis' feel, but word each platform's version a little differently so "
+        "they aren't copies of each other.",
+        "Use each platform's own words for calls to action and audience (see below). If the original has no call "
+        "to action, don't add a pushy one.",
+        "Keep these exactly as they are, wherever they appear: @handles, credits to the original creator, links, "
+        "and #hashtags (keep hashtags at the end).",
+        "Don't invent facts about the video. Don't add hashtags that weren't there.",
+        f"Write in {s['language'] or 'the same language as the original'}.",
+        "",
+        "Platforms:",
+    ]
+    for p in platforms:
+        name, guide = PLATFORM_GUIDE[p]
+        lines.append(f"- {p} ({name}): {guide}")
+    lines += ["", "Original title:", title or "(none)", "", "Original description:", description or "(none)"]
+    schema = {"type": "OBJECT", "properties": {
+        p: {"type": "OBJECT", "properties": {"title": {"type": "STRING"}, "description": {"type": "STRING"}},
+            "required": ["title", "description"]} for p in platforms}, "required": platforms}
+    body = {"contents": [{"role": "user", "parts": [{"text": "\n".join(lines)}]}],
+            "generationConfig": {"responseMimeType": "application/json", "responseSchema": schema,
+                                 "temperature": 0.8}}
+    try:
+        r = _generate(s, pick_model(s["key"]), body, report)
+    except requests.RequestException as e:
+        raise SummaryError(f"Couldn't reach Gemini ({type(e).__name__}).", temporary=True)
+    if not r.ok:
+        raise SummaryError(_err(r, s["key"]), temporary=r.status_code == 429 or r.status_code >= 500)
+    cand = (r.json().get("candidates") or [{}])[0]
+    raw = _parse("".join(part.get("text", "") for part in (cand.get("content") or {}).get("parts", [])))
+    out = {}
+    for p in platforms:
+        t = raw.get(p) or {}
+        new_title = str(t.get("title") or "").strip().strip('"')
+        new_desc = str(t.get("description") or "").strip()
+        if not new_title and not new_desc:
+            continue
+        out[p] = {"title": new_title[:100] or title, "description": new_desc[:2000]}
+    if not out:
+        raise SummaryError("Gemini's answer was empty. Try again.")
+    return out
+
+
 BUSY_WAITS = (8, 20, 40)  # seconds to wait before retrying the same model when Google is overloaded
 
 

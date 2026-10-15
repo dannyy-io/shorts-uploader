@@ -1,5 +1,9 @@
 # What's new
 
+## 1.13.0
+- ✨ Tailor captions per platform: the AI rewrites each queued post's title and caption for each platform (subscribe on YouTube, follow on Instagram/TikTok, a little different on each). Button on the Queue tab; automatic when you add a platform to the queue and in Generate & queue.
+- Queue tab: "Captions per platform" on each post shows exactly what each platform will get.
+
 ## 1.12.1
 - Instagram: the app now serves each video itself through a short-lived Cloudflare quick tunnel (random link, closed as soon as Instagram has the video), since free file hosts turned out to be unreliable. They're still used as backups.
 

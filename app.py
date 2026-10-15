@@ -766,6 +766,97 @@ def api_queue():
     return _queue_payload()
 
 
+# ---------- tailor captions per platform (AI rewrites the text; queued posts only) ----------
+
+_tailor = {"running": False}
+_tailor_lock = threading.Lock()
+
+
+def _set_tailor(item_id, **state):
+    try:
+        scheduler._edit(item_id, lambda it, lst: it.update(tailor={**(it.get("tailor") or {}), **state}))
+    except KeyError:
+        pass
+
+
+def _tailor_item(item_id):
+    """Rewrite one queued post's title + caption for each platform it hasn't been posted to yet."""
+    item = next((i for i in scheduler.items() if i["id"] == item_id), None)
+    if not item or item["status"] in ("running", "done"):
+        return
+    texts = item.get("texts") or {}
+    targets = scheduler.remaining_platforms(item)
+    if len(item["platforms"]) < 2 or not targets:
+        _set_tailor(item_id, state="skipped", message="Only one platform")
+        return
+    src = texts.get("youtube") or next((texts[p] for p in item["platforms"] if p in texts), None) \
+        or {"title": item.get("title", ""), "description": ""}
+    _set_tailor(item_id, state="working", message="Writing")
+    try:
+        new = summarizer.tailor(src.get("title", ""), src.get("description", ""), targets)
+    except summarizer.SummaryError as e:
+        _set_tailor(item_id, state="error", message=str(e))
+        return
+
+    def save(it, lst):
+        if it["status"] == "running":  # it started posting meanwhile: leave it alone
+            it["tailor"] = {"state": "error", "message": "It was already posting"}
+            return
+        done = {p for p, r in (it.get("results") or {}).items() if r.get("state") == "done"}
+        for p, t in new.items():
+            if p in it["platforms"] and p not in done:
+                it.setdefault("texts", {})[p] = t
+        it["tailor"] = {"state": "done", "message": "", "at": time.time()}
+    try:
+        scheduler._edit(item_id, save)
+    except KeyError:
+        pass
+
+
+def _tailor_worker():
+    while True:
+        with _tailor_lock:
+            todo = [i["id"] for i in scheduler.items() if (i.get("tailor") or {}).get("state") == "waiting"]
+            if not todo:
+                _tailor["running"] = False
+                return
+        try:
+            _tailor_item(todo[0])
+        except Exception as e:  # keep going with the rest
+            _set_tailor(todo[0], state="error", message=f"Unexpected error: {type(e).__name__}: {e}")
+
+
+def _start_tailoring(item_ids):
+    """Mark posts for tailoring and make sure the background worker is running. Returns how many."""
+    n = 0
+    for item_id in item_ids:
+        _set_tailor(item_id, state="waiting", message="Waiting")
+        n += 1
+    with _tailor_lock:
+        if n and not _tailor["running"]:
+            _tailor["running"] = True
+            threading.Thread(target=_tailor_worker, daemon=True).start()
+    return n
+
+
+def _tailorable(item):
+    return item["status"] not in ("running", "done") and len(item["platforms"]) > 1 \
+        and bool(scheduler.remaining_platforms(item))
+
+
+@app.post("/api/queue/tailor")
+def api_queue_tailor():
+    """AI-rewrite the title + caption of queued posts for each platform. Body: {ids?: [...]} (default: all)."""
+    if not summarizer.settings()["key"]:
+        return jsonify(error="Add a Gemini API key in Settings → AI summaries first (it's free)."), 400
+    want = set((request.get_json(force=True) or {}).get("ids") or [])
+    ids = [i["id"] for i in scheduler.items() if _tailorable(i) and (not want or i["id"] in want)]
+    if not ids:
+        return jsonify(error="No queued posts go to more than one platform yet."), 400
+    n = _start_tailoring(ids)
+    return jsonify({**_queue_payload().get_json(), "tailoring": n})
+
+
 @app.post("/api/queue/platforms")
 def api_queue_platforms():
     """Also post already-queued videos to more platforms. Body: {platforms: [...], base: [[field, value], ...]}
@@ -779,7 +870,10 @@ def api_queue_platforms():
         return jsonify(error=f"Connect {', '.join(missing)} in Settings first."), 400
     opts = _platform_opts(MultiDict([(str(k), str(v)) for k, v in body.get("base") or []]))
     changed = scheduler.add_platforms(wanted, {p: opts[p] for p in wanted})
-    return jsonify({**_queue_payload().get_json(), "changed": changed})
+    tailoring = 0
+    if changed and body.get("tailor", True) and summarizer.settings()["key"]:
+        tailoring = _start_tailoring([i["id"] for i in scheduler.items() if i["id"] in changed and _tailorable(i)])
+    return jsonify({**_queue_payload().get_json(), "changed": len(changed), "tailoring": tailoring})
 
 
 @app.post("/api/queue/settings")
@@ -829,7 +923,7 @@ _app_state = {"restarting": False, "checking": False, "error": None}
 
 def _busy():
     """True while anything is uploading, downloading or converting (don't restart then)."""
-    if any(not j["done"] for j in list(_jobs.values())) or _auto["workers"]:
+    if any(not j["done"] for j in list(_jobs.values())) or _auto["workers"] or _tailor["running"]:
         return True
     if any(j["state"] == "running" for j in list(downloader._jobs.values())) or downloader._install["running"]:
         return True
@@ -1061,6 +1155,12 @@ def _auto_one(it):
     if code != 200:
         raise ValueError(body.get("error") or "Couldn't add it to the queue.")
     it.update(state="queued", message="Queued", when=body["scheduled"]["when"])
+    queued = body["scheduled"]
+    if shared.get("tailor") and len(queued["platforms"]) > 1:
+        it["message"] = "Queued · tailoring captions"
+        _set_tailor(queued["id"], state="working", message="Writing")
+        _tailor_item(queued["id"])
+        it["message"] = "Queued"
 
 
 def _auto_worker():
@@ -1118,7 +1218,8 @@ def api_autoqueue():
     if not any(k == "platforms" and v in PLATFORMS for k, v in base):
         return jsonify(error="Turn on at least one platform on the Upload tab first."), 400
     shared = {"description": str(body.get("description") or ""), "tags": str(body.get("tags") or ""),
-              "ai_desc": bool(body.get("ai_description", True)), "ai_hook": bool(body.get("ai_hook", False))}
+              "ai_desc": bool(body.get("ai_description", True)), "ai_hook": bool(body.get("ai_hook", False)),
+              "tailor": bool(body.get("tailor", True))}
     new = []
     for raw in (body.get("items") or [])[:500]:
         local, staged = str(raw.get("local_file") or ""), str(raw.get("staged") or "")
@@ -1284,6 +1385,9 @@ if __name__ == "__main__":
     _cleanup_leftovers()
     scheduler.on_posted = _on_posted
     scheduler.start(_run_scheduled)
+    # tailoring that was cut off by a restart picks up again
+    _start_tailoring([i["id"] for i in scheduler.items()
+                      if (i.get("tailor") or {}).get("state") in ("waiting", "working") and _tailorable(i)])
     if LAUNCHED:
         threading.Thread(target=_update_loop, daemon=True, name="updates").start()
         threading.Timer(30, _refresh_downloader_daily).start()

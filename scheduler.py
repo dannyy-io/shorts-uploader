@@ -163,9 +163,9 @@ def reschedule(item_id, when):
 
 
 def add_platforms(platforms, opts):
-    """Add platforms to every queued post that isn't posting right now. Returns how many posts changed.
+    """Add platforms to every queued post that isn't posting right now. Returns the ids of the posts changed.
     The new platforms get the same title and caption as the post's first platform."""
-    changed = 0
+    changed = []
     with _lock:
         lst = items()
         for item in lst:
@@ -182,7 +182,8 @@ def add_platforms(platforms, opts):
                 item.setdefault("opts", {})[p] = opts.get(p, {})
             item["texts"] = texts
             item["platforms"] = item["platforms"] + new
-            changed += 1
+            item.pop("tailor", None)  # its captions haven't been tailored for the new platform yet
+            changed.append(item["id"])
         _save(lst)
     return changed
 

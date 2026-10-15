@@ -213,6 +213,12 @@
   .q-when { font-size: 13px; color: var(--muted); }
   .q-when b { color: var(--text); font-weight: 600; }
   .q-tags { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+  .q-caps { grid-column: 1 / -1; font-size: 13px; }
+  .q-caps summary { cursor: pointer; color: var(--muted); }
+  .q-caps .cap { margin-top: 6px; padding: 6px 9px; border-radius: 8px; background: var(--panel-2); white-space: pre-wrap; word-break: break-word; }
+  .q-caps .cap b { display: block; font-size: 12px; color: var(--muted); font-weight: 600; margin-bottom: 2px; }
+  .tag.ai { border-color: color-mix(in srgb, var(--accent) 50%, var(--line)); color: var(--accent); }
+  .tag.ai.bad { color: var(--err); border-color: var(--err); }
   .q-addplat { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 13.5px; color: var(--muted);
                padding: 10px 12px; margin: 4px 0 10px; border: 1px dashed var(--line); border-radius: 10px; }
   .q-acts { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
@@ -707,6 +713,7 @@
       <button class="ghost" type="button" id="bulkAi">✨ Generate titles &amp; tags</button>
       <label><input type="checkbox" id="bulkAiDesc" checked> Start each description with its AI caption</label>
       <label><input type="checkbox" id="bulkAiHook" checked> Put AI hook text on each video</label>
+      <label title="Subscribe on YouTube, follow on Instagram and TikTok, slightly different wording on each"><input type="checkbox" id="bulkTailor" checked> Tailor captions for each platform</label>
     </div>
     <div id="bulkList"></div>
     <div class="row" style="flex-wrap:wrap">
@@ -1460,7 +1467,7 @@ async function loadQueue() {
           const r = (i.results || {})[p];
           const cls = r ? (r.state === "done" ? "ok" : "bad") : "";
           return `<span class="tag ${cls}">${NAMES[p]}${r ? (r.state === "done" ? " ✓" : " ✕") : ""}</span>`;
-        }).join("")}</div>
+        }).join("")}${tailorTag(i)}</div>
       </div>
       <div class="q-acts">${i.status === "running" ? "" : i.status === "preparing"
         ? `<button class="small-btn" data-q="remove" title="Remove from queue">🗑</button>` : `
@@ -1469,29 +1476,77 @@ async function loadQueue() {
         <button class="small-btn" data-q="remove" title="Remove from queue">🗑</button>`}</div>
       ${errors.length ? `<div class="q-msg">${errors.map(([p, r]) => `${p === "_video" ? "Video" : NAMES[p]}: ${escapeHtml(r.message)}`).join("<br>")}
         <br><span style="color:var(--muted)">${i.prep_error ? "Retry tries converting the video again." : "Retrying only re-posts the platforms that failed."}</span></div>` : ""}
+      ${captionsFor(i)}
     </div>`;
   }).join("") : `<div class="empty">Nothing scheduled. On the Upload tab, pick “Pick a time” or “Next open slot”.</div>`;
 }
+
+function tailorTag(i) {
+  const t = i.tailor || {};
+  if (t.state === "waiting" || t.state === "working") return `<span class="tag ai">✨ Tailoring captions…</span>`;
+  if (t.state === "done") return `<span class="tag ai" title="Title and caption rewritten for each platform">✨ Tailored</span>`;
+  if (t.state === "error") return `<span class="tag ai bad" title="${escapeHtml(t.message || "")}">✨ Tailoring failed</span>`;
+  return "";
+}
+function captionsFor(i) {
+  const texts = i.texts || {};
+  const ps = i.platforms.filter(p => texts[p]);
+  if (!ps.length) return "";
+  const open = queueOpenCaps.has(i.id) ? "open" : "";
+  return `<details class="q-caps" data-caps="${i.id}" ${open}><summary>Captions${ps.length > 1 ? " per platform" : ""}</summary>
+    ${(i.tailor || {}).state === "error" ? `<div style="color:var(--err);margin-top:4px">${escapeHtml(i.tailor.message || "")}</div>` : ""}
+    ${ps.map(p => {
+      const t = texts[p];
+      const body = p === "youtube" ? `${t.title}\n\n${t.description || ""}` : [t.title, t.description].filter(Boolean).join("\n\n");
+      return `<div class="cap"><b>${NAMES[p]}${p === "youtube" ? " · title, then description" : " · caption"}</b>${escapeHtml(body.trim())}</div>`;
+    }).join("")}</details>`;
+}
+const queueOpenCaps = new Set();
+document.addEventListener("toggle", (e) => {
+  const d = e.target.closest && e.target.closest("[data-caps]"); if (!d) return;
+  d.open ? queueOpenCaps.add(d.dataset.caps) : queueOpenCaps.delete(d.dataset.caps);
+}, true);
 
 function renderAddPlatforms(active) {
   // connected platforms that some queued posts aren't going to yet
   const open = active.filter(i => i.status !== "running");
   const offers = Object.keys(NAMES).filter(p => state.platforms[p] && state.platforms[p].connected)
     .map(p => [p, open.filter(i => !i.platforms.includes(p)).length]).filter(([, n]) => n);
-  $("#qAddPlat").hidden = !offers.length;
-  $("#qAddPlat").innerHTML = offers.length ? `<span>Also post the queued videos to:</span>` + offers.map(([p, n]) =>
-    `<button class="small-btn" data-addplat="${p}">+ ${NAMES[p]} <span style="color:var(--muted)">(${n} post${n > 1 ? "s" : ""})</span></button>`).join("") : "";
+  const multi = open.filter(i => i.platforms.length > 1 && i.status !== "done");
+  const untailored = multi.filter(i => !["done", "waiting", "working"].includes((i.tailor || {}).state)).length;
+  const working = multi.some(i => ["waiting", "working"].includes((i.tailor || {}).state));
+  const parts = [];
+  if (offers.length) parts.push(`<span>Also post the queued videos to:</span>` + offers.map(([p, n]) =>
+    `<button class="small-btn" data-addplat="${p}">+ ${NAMES[p]} <span style="color:var(--muted)">(${n} post${n > 1 ? "s" : ""})</span></button>`).join(""));
+  if (multi.length) parts.push(working ? `<span>✨ Tailoring captions for each platform…</span>`
+    : `<button class="small-btn" id="qTailor" title="The AI rewrites each post's title and caption for each platform (subscribe on YouTube, follow on Instagram and TikTok)">✨ Tailor captions per platform${untailored ? ` (${untailored})` : " again"}</button>`);
+  $("#qAddPlat").hidden = !parts.length;
+  $("#qAddPlat").innerHTML = parts.join(`<span style="flex-basis:100%;height:0"></span>`);
 }
 $("#qAddPlat").onclick = async (e) => {
+  if (e.target.closest("#qTailor")) {
+    const btn = e.target.closest("#qTailor");
+    const multi = (queue.items || []).filter(i => i.platforms.length > 1 && !["running", "done"].includes(i.status));
+    const fresh = multi.filter(i => !["done", "waiting", "working"].includes((i.tailor || {}).state));
+    const ids = (fresh.length ? fresh : multi).map(i => i.id);
+    if (needAiKey()) return;
+    btn.disabled = true;
+    try {
+      const r = await api("/api/queue/tailor", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids }) });
+      toast(`Tailoring captions for ${r.tailoring} post${r.tailoring === 1 ? "" : "s"}. Open "Captions" on a post to check them.`);
+    } catch (err) { toast(err.message, true); btn.disabled = false; }
+    return loadQueue();
+  }
   const b = e.target.closest("[data-addplat]"); if (!b) return;
   const p = b.dataset.addplat;
   const extra = p === "tiktok" ? ` They'll use your TikTok settings from the Upload tab (${$("#tt_mode").selectedOptions[0].text}).` : "";
-  if (!confirm(`Add ${NAMES[p]} to your queued posts? They keep their post times, titles and captions.${extra}`)) return;
+  const ai = state.settings.ai && state.settings.ai.has_key;
+  if (!confirm(`Add ${NAMES[p]} to your queued posts? They keep their post times.${ai ? ` The AI then rewrites each title and caption to fit ${NAMES[p]} (e.g. "follow" instead of "subscribe").` : ""}${extra}`)) return;
   b.disabled = true;
   try {
     const r = await api("/api/queue/platforms", { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ platforms: [p], base: baseFields() }) });
-    toast(`Added ${NAMES[p]} to ${r.changed} queued post${r.changed === 1 ? "" : "s"}`);
+    toast(`Added ${NAMES[p]} to ${r.changed} queued post${r.changed === 1 ? "" : "s"}${r.tailoring ? ", tailoring the captions now" : ""}`);
   } catch (err) { toast(err.message, true); b.disabled = false; }
   loadQueue();
 };
@@ -1785,6 +1840,8 @@ $("#bulkList").addEventListener("input", (e) => {
 $("#bulkAiDesc").checked = store.get("bulkAiDesc", true);
 $("#bulkAiDesc").onchange = () => store.set("bulkAiDesc", $("#bulkAiDesc").checked);
 $("#bulkAiHook").checked = store.get("bulkAiHook", true);
+$("#bulkTailor").checked = store.get("bulkTailor", true);
+$("#bulkTailor").onchange = () => store.set("bulkTailor", $("#bulkTailor").checked);
 $("#bulkAiHook").onchange = () => { store.set("bulkAiHook", $("#bulkAiHook").checked); renderBulk(); };
 $("#bulkList").addEventListener("click", (e) => {
   const rm = e.target.closest("[data-brm]"), ai = e.target.closest("[data-bai]");
@@ -1868,7 +1925,7 @@ $("#bulkAuto").onclick = async () => {
           hook: b.hook || "", hook_locked: !!(b.hookEdited || b.ai === "done"),
           ai: b.ai === "done" ? { title: b.title, description: b.aiDesc || "", hook: b.hook || "", tags: [] } : null })),
         base: baseFields(), description: $("#bulkDesc").value, tags: $("#bulkTags").value,
-        ai_description: $("#bulkAiDesc").checked, ai_hook: $("#bulkAiHook").checked }) });
+        ai_description: $("#bulkAiDesc").checked, ai_hook: $("#bulkAiHook").checked, tailor: $("#bulkTailor").checked }) });
     send.forEach(b => { b.state = "auto"; b.key = bulkKey(b); b.msg = "✨ Waiting for the AI…"; });
     toast(`Working on ${send.length}. It keeps going in the background, so you can close this window.`);
     applyAuto(st); watchAuto();

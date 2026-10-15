@@ -180,6 +180,8 @@ Under the platform toggles on the Upload tab, choose when it goes out:
 - **Pick a time**: posts at the date and time you choose.
 - **Next open slot**: puts the video on the next free post time. Set your post times in the **Queue** tab (for example 12:00 AM and 12:00 PM for two posts a day). Add ten videos this way and you've got five days of posts lined up.
 
+**Captions per platform:** with a Gemini key, **✨ Tailor captions per platform** (Queue tab) has the AI rewrite each queued post's title and caption for each platform it goes to: *subscribe* on YouTube, *follow* / *send this to a friend* on Instagram and TikTok, and slightly different wording on each so they aren't copies. Credits, @handles, links and hashtags are kept as they are. It's text only, so it's quick and barely uses your free quota. It happens automatically when you add a platform to the queue with **+ Instagram** / **+ TikTok**, and in **Generate & queue** when **Tailor captions for each platform** is ticked. Open **Captions per platform** on any post to check exactly what each platform will get. Platforms a post already went out on are never changed.
+
 The **Queue** tab lists everything scheduled. Connected a platform after queueing? Click **+ Instagram** (or **+ TikTok**) above the list to add it to every queued post; they keep their times, titles and captions. You can **Post now**, **Change time**, or remove any of them. If one platform fails (say Instagram's token expired), the post stays in the queue with the error; fix the problem and hit **Retry now**. It only re-posts to the platforms that failed, so you never get a duplicate on the ones that worked.
 
 **Important:** scheduled posts go out *from your PC*, so the app has to be running at post time:
