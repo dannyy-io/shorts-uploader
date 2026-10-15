@@ -72,6 +72,8 @@ Your Instagram account must be **Professional** (Creator or Business): Instagram
 
 You can leave the Meta app in Development mode — it works for your own account because you're the app's admin. Tokens last 60 days; the tool refreshes yours automatically every week as long as you use it at least once every couple of months.
 
+**How the video gets to Instagram:** with this kind of token, Instagram can only post a video it downloads from a public link. So before each post the app uploads the video to a free temporary file host (litterbox.catbox.moe, or tmpfiles.org if that's down) under a random name, Instagram downloads it, and the link deletes itself within an hour. If you'd rather not use a file host, use the Facebook Login setup below, which sends the file straight to Meta.
+
 **If uploads fail with a permissions error:** Meta's docs officially describe direct file uploads for the Facebook-Login version of the API. If the Instagram-Login token above gets rejected at the upload step, link your Instagram to a Facebook Page, get a token from the Graph API Explorer with `instagram_basic`, `instagram_content_publish`, `pages_show_list` and `pages_read_engagement`, then in Settings → Instagram → **Advanced** choose **Facebook Login** and enter your Instagram user ID. (That token isn't auto-refreshed — swap in a new one when it expires.)
 
 ## 3. TikTok

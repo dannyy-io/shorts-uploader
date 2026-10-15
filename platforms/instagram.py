@@ -10,6 +10,7 @@ import time
 import requests
 
 import storage
+from . import temphost
 from .common import ProgressFile, UploadError, build_caption, error_text
 
 NAME = "Instagram"
@@ -89,48 +90,20 @@ def upload(path, title, description, opts, report):
     token, user_id = _token()
     host = _host()
     base = f"https://{host}/{VERSION}"
-    size = os.path.getsize(path)
-
-    report(0, "Creating Reel")
-    data = {
+    fields = {
         "media_type": "REELS",
-        "upload_type": "resumable",
         "caption": caption,
         "share_to_feed": "true" if opts.get("share_to_feed", True) else "false",
         "access_token": token,
     }
     if opts.get("thumb_offset") is not None:
-        data["thumb_offset"] = str(int(opts["thumb_offset"]))  # cover frame, in milliseconds
-    r = requests.post(f"{base}/{user_id}/media", data=data, timeout=60)
-    if not r.ok:
-        raise UploadError(_err(r))
-    container = r.json()
-    cid = container["id"]
-    upload_uri = container.get("uri") or f"https://rupload.facebook.com/ig-api-upload/{VERSION}/{cid}"
+        fields["thumb_offset"] = str(int(opts["thumb_offset"]))  # cover frame, in milliseconds
 
-    with ProgressFile(path, report, 0, 80) as body:
-        up = requests.post(upload_uri, data=body, timeout=(30, 900), headers={
-            "Authorization": f"OAuth {token}",
-            "offset": "0",
-            "file_size": str(size),
-        })
-    if not up.ok:
-        raise UploadError(_err(up, "Instagram rejected the file: "))
-
-    report(82, "Instagram is processing")
-    deadline = time.time() + 15 * 60
-    while True:
-        time.sleep(5)
-        s = requests.get(f"{base}/{cid}", params={"fields": "status_code,status", "access_token": token},
-                         timeout=30)
-        if s.ok:
-            code = s.json().get("status_code")
-            if code == "FINISHED":
-                break
-            if code in ("ERROR", "EXPIRED"):
-                raise UploadError(f"Instagram couldn't process the video: {s.json().get('status', code)}")
-        if time.time() > deadline:
-            raise UploadError("Instagram is taking unusually long to process the video.")
+    if host == "graph.instagram.com":
+        # Instagram Login can't take a file upload: Instagram downloads the video from a public link.
+        cid = _via_temporary_link(base, fields, path, token, user_id, report)
+    else:
+        cid = _via_resumable_upload(base, fields, path, token, user_id, report)
 
     report(95, "Publishing")
     pub = requests.post(f"{base}/{user_id}/media_publish",
@@ -147,3 +120,71 @@ def upload(path, title, description, opts, report):
         pass
     report(100, "Posted")
     return {"url": url, "message": "Posted to Instagram Reels."}
+
+
+def _via_resumable_upload(base, fields, path, token, user_id, report):
+    """Facebook Login: send the file straight to Meta."""
+    report(0, "Creating Reel")
+    r = requests.post(f"{base}/{user_id}/media", data={**fields, "upload_type": "resumable"}, timeout=60)
+    if not r.ok:
+        raise UploadError(_err(r))
+    container = r.json()
+    cid = container["id"]
+    upload_uri = container.get("uri") or f"https://rupload.facebook.com/ig-api-upload/{VERSION}/{cid}"
+    with ProgressFile(path, report, 0, 80) as body:
+        up = requests.post(upload_uri, data=body, timeout=(30, 900), headers={
+            "Authorization": f"OAuth {token}",
+            "offset": "0",
+            "file_size": str(os.path.getsize(path)),
+        })
+    if not up.ok:
+        raise UploadError(_err(up, "Instagram rejected the file: "))
+    report(82, "Instagram is processing")
+    _wait_until_ready(base, cid, token)
+    return cid
+
+
+def _via_temporary_link(base, fields, path, token, user_id, report):
+    """Instagram Login: put the video on a temporary file host (link expires within an hour),
+    let Instagram download it from there. Tries the next host if one is down or Instagram can't fetch it."""
+    errors = []
+    for i, (name, send) in enumerate(temphost.HOSTS):
+        report(5 + i * 3, f"Making a temporary link for Instagram ({name})")
+        try:
+            url = send(path)
+        except temphost.HostError as e:
+            errors.append(f"{name}: {e}")
+            continue
+        report(40, "Instagram is downloading the video")
+        r = requests.post(f"{base}/{user_id}/media", data={**fields, "video_url": url}, timeout=60)
+        if not r.ok:
+            raise UploadError(_err(r))
+        cid = r.json()["id"]
+        report(60, "Instagram is processing")
+        try:
+            _wait_until_ready(base, cid, token)
+            return cid
+        except FetchError as e:  # Instagram couldn't get the video from this host: try the next one
+            errors.append(f"{name}: {e}")
+    raise UploadError("Couldn't get the video to Instagram through a temporary link. "
+                      + " | ".join(errors) + " Try again later.")
+
+
+class FetchError(UploadError):
+    pass
+
+
+def _wait_until_ready(base, cid, token):
+    deadline = time.time() + 15 * 60
+    while True:
+        time.sleep(5)
+        s = requests.get(f"{base}/{cid}", params={"fields": "status_code,status", "access_token": token},
+                         timeout=30)
+        if s.ok:
+            code = s.json().get("status_code")
+            if code == "FINISHED":
+                return
+            if code in ("ERROR", "EXPIRED"):
+                raise FetchError(f"Instagram couldn't process the video: {s.json().get('status', code)}")
+        if time.time() > deadline:
+            raise UploadError("Instagram is taking unusually long to process the video.")

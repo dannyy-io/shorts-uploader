@@ -1,5 +1,8 @@
 # What's new
 
+## 1.12.0
+- Fix: Instagram posts failed with "The parameter video_url is required". With an Instagram-login token, Instagram only accepts videos from a public link, so the app now puts each video on a temporary file host (random link, deleted within an hour) for Instagram to download, with a backup host if the first one is down. Facebook-login setups still send the file directly.
+
 ## 1.11.1
 - Instagram "API access blocked" errors now explain what to do (it's Meta locking a new developer account or app until it's verified).
 
