@@ -36,7 +36,7 @@ def set_token(token, user_id=None):
         r = requests.get(f"https://{host}/{VERSION}/me",
                          params={"fields": "user_id,username", "access_token": token}, timeout=20)
         if not r.ok:
-            raise UploadError(f"Instagram didn't accept that token: {error_text(r)}")
+            raise UploadError(_err(r, "Instagram didn't accept that token: "))
         me = r.json()
         user_id, username = me.get("user_id") or me.get("id"), me.get("username")
     else:
@@ -45,7 +45,7 @@ def set_token(token, user_id=None):
         r = requests.get(f"https://{host}/{VERSION}/{user_id}",
                          params={"fields": "username", "access_token": token}, timeout=20)
         if not r.ok:
-            raise UploadError(f"Instagram didn't accept that token: {error_text(r)}")
+            raise UploadError(_err(r, "Instagram didn't accept that token: "))
         username = r.json().get("username")
     storage.set_section("tokens", "instagram", {
         "access_token": token, "user_id": str(user_id), "username": username, "saved_at": time.time(),
@@ -72,6 +72,18 @@ def _token():
     return tok["access_token"], tok["user_id"]
 
 
+BLOCKED_HINT = (" Meta has locked API access for your developer account or app (common with new accounts). "
+                "Open developers.facebook.com, complete any verification it asks for (look for a banner or "
+                "notification), check the app's dashboard for restriction alerts, then hit Retry.")
+
+
+def _err(resp, prefix=""):
+    text = error_text(resp)
+    if "api access blocked" in text.lower():
+        text += BLOCKED_HINT
+    return prefix + text
+
+
 def upload(path, title, description, opts, report):
     caption = build_caption(title, description, CAPTION_LIMIT)
     token, user_id = _token()
@@ -91,7 +103,7 @@ def upload(path, title, description, opts, report):
         data["thumb_offset"] = str(int(opts["thumb_offset"]))  # cover frame, in milliseconds
     r = requests.post(f"{base}/{user_id}/media", data=data, timeout=60)
     if not r.ok:
-        raise UploadError(error_text(r))
+        raise UploadError(_err(r))
     container = r.json()
     cid = container["id"]
     upload_uri = container.get("uri") or f"https://rupload.facebook.com/ig-api-upload/{VERSION}/{cid}"
@@ -103,7 +115,7 @@ def upload(path, title, description, opts, report):
             "file_size": str(size),
         })
     if not up.ok:
-        raise UploadError(f"Instagram rejected the file: {error_text(up)}")
+        raise UploadError(_err(up, "Instagram rejected the file: "))
 
     report(82, "Instagram is processing")
     deadline = time.time() + 15 * 60
@@ -124,7 +136,7 @@ def upload(path, title, description, opts, report):
     pub = requests.post(f"{base}/{user_id}/media_publish",
                         data={"creation_id": cid, "access_token": token}, timeout=60)
     if not pub.ok:
-        raise UploadError(f"Instagram processed the video but publishing failed: {error_text(pub)}")
+        raise UploadError(_err(pub, "Instagram processed the video but publishing failed: "))
     media_id = pub.json()["id"]
 
     url = None

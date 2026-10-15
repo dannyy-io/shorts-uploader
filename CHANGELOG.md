@@ -1,5 +1,8 @@
 # What's new
 
+## 1.11.1
+- Instagram "API access blocked" errors now explain what to do (it's Meta locking a new developer account or app until it's verified).
+
 ## 1.11.0
 - Queue tab: "Also post the queued videos to: + Instagram / + TikTok" adds a newly connected platform to posts that are already queued. They keep their post times, titles and captions.
 
