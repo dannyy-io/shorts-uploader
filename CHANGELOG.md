@@ -1,5 +1,8 @@
 # What's new
 
+## 1.12.1
+- Instagram: the app now serves each video itself through a short-lived Cloudflare quick tunnel (random link, closed as soon as Instagram has the video), since free file hosts turned out to be unreliable. They're still used as backups.
+
 ## 1.12.0
 - Fix: Instagram posts failed with "The parameter video_url is required". With an Instagram-login token, Instagram only accepts videos from a public link, so the app now puts each video on a temporary file host (random link, deleted within an hour) for Instagram to download, with a backup host if the first one is down. Facebook-login setups still send the file directly.
 

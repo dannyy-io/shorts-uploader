@@ -145,26 +145,25 @@ def _via_resumable_upload(base, fields, path, token, user_id, report):
 
 
 def _via_temporary_link(base, fields, path, token, user_id, report):
-    """Instagram Login: put the video on a temporary file host (link expires within an hour),
-    let Instagram download it from there. Tries the next host if one is down or Instagram can't fetch it."""
+    """Instagram Login: give Instagram a temporary public link to download the video from (our own
+    short-lived Cloudflare tunnel first, then free file hosts). The link stays up until Instagram has
+    processed the video. Tries the next way if one fails or Instagram can't fetch from it."""
     errors = []
-    for i, (name, send) in enumerate(temphost.HOSTS):
-        report(5 + i * 3, f"Making a temporary link for Instagram ({name})")
+    for i, (name, link) in enumerate(temphost.HOSTS):
+        report(3 + i * 4, f"Making a temporary link for Instagram ({name})")
         try:
-            url = send(path)
+            with link(path) as url:
+                report(40, "Instagram is downloading the video")
+                r = requests.post(f"{base}/{user_id}/media", data={**fields, "video_url": url}, timeout=60)
+                if not r.ok:
+                    raise UploadError(_err(r))
+                cid = r.json()["id"]
+                report(60, "Instagram is processing")
+                _wait_until_ready(base, cid, token)
+                return cid
         except temphost.HostError as e:
             errors.append(f"{name}: {e}")
-            continue
-        report(40, "Instagram is downloading the video")
-        r = requests.post(f"{base}/{user_id}/media", data={**fields, "video_url": url}, timeout=60)
-        if not r.ok:
-            raise UploadError(_err(r))
-        cid = r.json()["id"]
-        report(60, "Instagram is processing")
-        try:
-            _wait_until_ready(base, cid, token)
-            return cid
-        except FetchError as e:  # Instagram couldn't get the video from this host: try the next one
+        except FetchError as e:  # Instagram couldn't get or read the video from this link: try the next way
             errors.append(f"{name}: {e}")
     raise UploadError("Couldn't get the video to Instagram through a temporary link. "
                       + " | ".join(errors) + " Try again later.")
