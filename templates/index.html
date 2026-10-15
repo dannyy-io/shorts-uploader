@@ -213,6 +213,8 @@
   .q-when { font-size: 13px; color: var(--muted); }
   .q-when b { color: var(--text); font-weight: 600; }
   .q-tags { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+  .q-addplat { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 13.5px; color: var(--muted);
+               padding: 10px 12px; margin: 4px 0 10px; border: 1px dashed var(--line); border-radius: 10px; }
   .q-acts { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
   .q-msg { grid-column: 1 / -1; font-size: 13px; color: var(--err); }
   .q-item.running .q-when b { color: var(--accent); }
@@ -573,6 +575,7 @@
 
   <section class="card">
     <div class="files-head"><h2>Scheduled</h2></div>
+    <div class="q-addplat" id="qAddPlat" hidden></div>
     <div id="qList"><div class="empty">Nothing scheduled. On the Upload tab, pick “Pick a time” or “Next open slot”.</div></div>
   </section>
 </main>
@@ -1440,6 +1443,7 @@ async function loadQueue() {
   $("#autostartWrap").hidden = !queue.autostart_supported;
   $("#autostart").checked = queue.autostart;
   if ($("#queueView").hidden) return;
+  renderAddPlatforms(active);
 
   $("#qList").innerHTML = active.length ? active.map(i => {
     const running = i.status === "running" || i.status === "preparing";
@@ -1468,6 +1472,29 @@ async function loadQueue() {
     </div>`;
   }).join("") : `<div class="empty">Nothing scheduled. On the Upload tab, pick “Pick a time” or “Next open slot”.</div>`;
 }
+
+function renderAddPlatforms(active) {
+  // connected platforms that some queued posts aren't going to yet
+  const open = active.filter(i => i.status !== "running");
+  const offers = Object.keys(NAMES).filter(p => state.platforms[p] && state.platforms[p].connected)
+    .map(p => [p, open.filter(i => !i.platforms.includes(p)).length]).filter(([, n]) => n);
+  $("#qAddPlat").hidden = !offers.length;
+  $("#qAddPlat").innerHTML = offers.length ? `<span>Also post the queued videos to:</span>` + offers.map(([p, n]) =>
+    `<button class="small-btn" data-addplat="${p}">+ ${NAMES[p]} <span style="color:var(--muted)">(${n} post${n > 1 ? "s" : ""})</span></button>`).join("") : "";
+}
+$("#qAddPlat").onclick = async (e) => {
+  const b = e.target.closest("[data-addplat]"); if (!b) return;
+  const p = b.dataset.addplat;
+  const extra = p === "tiktok" ? ` They'll use your TikTok settings from the Upload tab (${$("#tt_mode").selectedOptions[0].text}).` : "";
+  if (!confirm(`Add ${NAMES[p]} to your queued posts? They keep their post times, titles and captions.${extra}`)) return;
+  b.disabled = true;
+  try {
+    const r = await api("/api/queue/platforms", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ platforms: [p], base: baseFields() }) });
+    toast(`Added ${NAMES[p]} to ${r.changed} queued post${r.changed === 1 ? "" : "s"}`);
+  } catch (err) { toast(err.message, true); b.disabled = false; }
+  loadQueue();
+};
 
 async function queueAction(id, action, body) {
   try {

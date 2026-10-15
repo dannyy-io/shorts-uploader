@@ -447,7 +447,19 @@ def _submit_post(form, video=None):
             os.remove(path)
         return dict(error="That file is empty."), 400
 
-    opts = {
+    opts = _platform_opts(form)
+
+    mode = form.get("when_mode", "now")
+    if mode in ("at", "daily"):
+        with _slot_lock:
+            return _schedule_post(path, local_path, mode, form, filename, title, texts, selected, opts, fix,
+                                  local_name)
+    return _post_now(job_id, filename, title, selected, local_name, fix, path, texts, opts, local_path)
+
+
+def _platform_opts(form):
+    """Each platform's upload settings (privacy, feed, drafts...) from the upload form's fields."""
+    return {
         "youtube": {
             "privacy": form.get("yt_privacy", "public"),
             "made_for_kids": form.get("yt_kids") == "1",
@@ -464,12 +476,8 @@ def _submit_post(form, video=None):
         },
     }
 
-    mode = form.get("when_mode", "now")
-    if mode in ("at", "daily"):
-        with _slot_lock:
-            return _schedule_post(path, local_path, mode, form, filename, title, texts, selected, opts, fix,
-                                  local_name)
 
+def _post_now(job_id, filename, title, selected, local_name, fix, path, texts, opts, local_path):
     job = _new_job(job_id, filename, title, selected)
     job["source_download"] = local_name or None
     if fix["enabled"]:
@@ -756,6 +764,22 @@ def _queue_payload():
 @app.get("/api/queue")
 def api_queue():
     return _queue_payload()
+
+
+@app.post("/api/queue/platforms")
+def api_queue_platforms():
+    """Also post already-queued videos to more platforms. Body: {platforms: [...], base: [[field, value], ...]}
+    (base = the Upload tab's settings, for each platform's options). Times, titles and captions stay the same."""
+    body = request.get_json(force=True) or {}
+    wanted = [p for p in body.get("platforms") or [] if p in PLATFORMS]
+    if not wanted:
+        return jsonify(error="Pick a platform to add."), 400
+    missing = [PLATFORMS[p].NAME for p in wanted if not PLATFORMS[p].status().get("connected")]
+    if missing:
+        return jsonify(error=f"Connect {', '.join(missing)} in Settings first."), 400
+    opts = _platform_opts(MultiDict([(str(k), str(v)) for k, v in body.get("base") or []]))
+    changed = scheduler.add_platforms(wanted, {p: opts[p] for p in wanted})
+    return jsonify({**_queue_payload().get_json(), "changed": changed})
 
 
 @app.post("/api/queue/settings")

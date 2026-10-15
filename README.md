@@ -178,7 +178,7 @@ Under the platform toggles on the Upload tab, choose when it goes out:
 - **Pick a time**: posts at the date and time you choose.
 - **Next open slot**: puts the video on the next free post time. Set your post times in the **Queue** tab (for example 12:00 AM and 12:00 PM for two posts a day). Add ten videos this way and you've got five days of posts lined up.
 
-The **Queue** tab lists everything scheduled. You can **Post now**, **Change time**, or remove any of them. If one platform fails (say Instagram's token expired), the post stays in the queue with the error; fix the problem and hit **Retry now**. It only re-posts to the platforms that failed, so you never get a duplicate on the ones that worked.
+The **Queue** tab lists everything scheduled. Connected a platform after queueing? Click **+ Instagram** (or **+ TikTok**) above the list to add it to every queued post; they keep their times, titles and captions. You can **Post now**, **Change time**, or remove any of them. If one platform fails (say Instagram's token expired), the post stays in the queue with the error; fix the problem and hit **Retry now**. It only re-posts to the platforms that failed, so you never get a duplicate on the ones that worked.
 
 **Important:** scheduled posts go out *from your PC*, so the app has to be running at post time:
 

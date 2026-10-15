@@ -1,5 +1,8 @@
 # What's new
 
+## 1.11.0
+- Queue tab: "Also post the queued videos to: + Instagram / + TikTok" adds a newly connected platform to posts that are already queued. They keep their post times, titles and captions.
+
 ## 1.10.0
 - 🪝 Hook text: big text on the video (e.g. "wait for his reaction") to make people keep watching. Two looks, top or middle, whole video or the first 3/5 seconds, with a live preview.
 - ✨ The AI writes a hook for each video: "Use as hook" on the Upload tab, and "Put AI hook text on each video" in Bulk add / Generate & queue.

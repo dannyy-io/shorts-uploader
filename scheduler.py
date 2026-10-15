@@ -162,6 +162,31 @@ def reschedule(item_id, when):
     return result
 
 
+def add_platforms(platforms, opts):
+    """Add platforms to every queued post that isn't posting right now. Returns how many posts changed.
+    The new platforms get the same title and caption as the post's first platform."""
+    changed = 0
+    with _lock:
+        lst = items()
+        for item in lst:
+            if item["status"] in ("running", "done"):
+                continue
+            new = [p for p in platforms if p not in item["platforms"]]
+            if not new:
+                continue
+            texts = item.get("texts") or {}
+            src = next((texts[p] for p in item["platforms"] if p in texts), None) or {
+                "title": item.get("title", ""), "description": item.get("description", "")}
+            for p in new:  # (Instagram and TikTok join title + description into one caption when posting)
+                texts[p] = {"title": src.get("title") or item.get("title", ""), "description": src.get("description", "")}
+                item.setdefault("opts", {})[p] = opts.get(p, {})
+            item["texts"] = texts
+            item["platforms"] = item["platforms"] + new
+            changed += 1
+        _save(lst)
+    return changed
+
+
 def post_now(item_id):
     return reschedule(item_id, time.time())
 
